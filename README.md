@@ -7,8 +7,9 @@ protocols over Class-Group additively homomorphic encryption:
 - RF-OPA: oblivious polynomial addition built from batched RF-OLE.
 - RF-PSI: private set intersection built from RF-OPA.
 
-The CG-AHE wrapper and BICYCL headers used by the demos are vendored in
-`third_party/cg_ahe`, so this directory can be uploaded as its own repository.
+The CG-AHE wrapper and BICYCL headers used by the demos are included under
+`third_party/cg_ahe`, making the artifact self-contained for building and
+reproducing the experiments.
 
 ## Dependencies
 
@@ -65,9 +66,19 @@ The scripts create `build/` if needed and write process logs to `logs/`.
 ## Two-Machine Protocol Entrypoints
 
 From the controller machine, run one protocol at a time with the `run_2pc_*.sh`
-scripts. They default to receiver side `party_b_user@PARTY_B_IP`, sender side
-`party_a_user@PARTY_A_IP`, remote build directory `build-2pc`, and local checker
-directory `build-portable`.
+scripts. Set the two party addresses, users, repository paths, build directory,
+and checker directory through environment variables:
+
+```bash
+export LOCAL_IP=<party-b-ip>
+export REMOTE_IP=<party-a-ip>
+export LOCAL_USER=<party-b-user>
+export REMOTE_USER=<party-a-user>
+export LOCAL_ROOT=<party-b-repo-path>
+export REMOTE_ROOT=<party-a-repo-path>
+export BUILD_DIR=build-2pc
+export CHECKER_DIR="$PWD/build-portable"
+```
 
 ```bash
 bash run_2pc_direct_ole.sh 1000
@@ -77,6 +88,7 @@ bash run_2pc_rf_ope.sh 1000
 bash run_2pc_direct_opa.sh 1000
 bash run_2pc_rf_opa.sh 1000
 bash run_2pc_direct_psi.sh 1000
+bash run_2pc_direct_psi2.sh 1000
 bash run_2pc_rf_psi.sh 1000
 bash run_2pc_rf_psi2.sh 1000
 ```
@@ -84,10 +96,13 @@ bash run_2pc_rf_psi2.sh 1000
 Common overrides:
 
 ```bash
-LOCAL_IP=PARTY_B_IP REMOTE_IP=PARTY_A_IP CG_RF_LANES=8 bash run_2pc_rf_psi.sh 1000
+LOCAL_IP=<party-b-ip> REMOTE_IP=<party-a-ip> CG_RF_LANES=8 bash run_2pc_rf_psi.sh 1000
 ```
 
-See `RUN_2PC_FROM_10_5_31_190.md` for the full sync/build/run workflow.
+Sweep scripts are provided for the table-style experiments, including
+`benchmark_2pc_cg_sweep.sh`, `benchmark_2pc_ole3_sweep.sh`,
+`benchmark_2pc_psi_fast_sweep.sh`, `run_2pc_direct_psi2_sweep.sh`, and
+`run_2pc_rf_psi2_sweep.sh`.
 
 All `run_2pc_*.sh` entrypoints use file-backed benchmark inputs. OLE, OPE,
 OPA, one-way PSI, and two-way PSI also run external correctness checks after the
@@ -110,13 +125,7 @@ The default is one lane, which preserves the original single-connection
 behavior. The same batched RF-OLE helper is used by RF-OPA, and RF-PSI builds on
 that RF-OPA layer.
 
-## Polynomial Layer
 
-OPA batch-evaluates `p_A`, `r_A`, and `p_B` with a product-tree multipoint
-evaluator over the CG-AHE plaintext modulus `q`. PSI set-polynomial construction
-also uses the same balanced product tree for `prod(X - item)`. The modulus is
-still the random CG plaintext prime, so this is not an NTT-specific modulus
-change.
 
 ## Main Files
 
@@ -125,14 +134,20 @@ change.
 - `cg_rf_ole_batch.hpp`: shared batched RF-OLE endpoint helper for OPA/PSI.
 - `cg_rf_opa.hpp`: RF-OPA reduction to batched RF-OLE.
 - `cg_rf_psi_sender.cpp`, `cg_rf_psi_receiver.cpp`: RF-PSI reduction to RF-OPA.
+- `cg_psi2_sender.cpp`, `cg_psi2_receiver.cpp`: direct two-way PSI, implemented
+  as direct one-way PSI followed by a clear reveal-back of the intersection.
+- `cg_rf_psi2_reveal_sender.cpp`, `cg_rf_psi2_reveal_receiver.cpp`,
+  `cg_rf_psi2_reveal_srf.cpp`, `cg_rf_psi2_reveal_rrf.cpp`: RF two-way PSI
+  reveal-back phase.
 - `generate_sets.py`, `check_correctness.py`: 128-bit plaintext PSI test-data
   generation and external receiver-output checking.
 - `cg_bench.cpp`: standalone no-socket benchmark/simulation.
 - `OPERATION_COMMENTS.md`: role-by-role protocol notes.
 
+
+
 ## Notes
 
-This is research/demo code. It favors protocol clarity and local benchmarking
-over production hardening. The localhost demo scripts use fixed ports
+ The localhost demo scripts use fixed ports
 `9001`, `9002`, and `9003`; make sure no old demo process is still running if a
 script reports a bind/connect failure.
