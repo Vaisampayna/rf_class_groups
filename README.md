@@ -130,13 +130,6 @@ change.
 - `cg_bench.cpp`: standalone no-socket benchmark/simulation.
 - `OPERATION_COMMENTS.md`: role-by-role protocol notes.
 
-## Artifact Layout
-
-Active source, scripts, and documentation live at the repository root.
-Generated build/log/input/benchmark outputs are ignored by git. Older full
-simulation OLE files that are not part of the active artifact build are parked
-under `archive_unused/fs_ole/`.
-
 ## Notes
 
 This is research/demo code. It favors protocol clarity and local benchmarking
