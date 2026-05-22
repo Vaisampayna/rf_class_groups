@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Launch one two-way RF-PSI experiment using the current construction:
-# ordinary one-way RF-PSI followed by an encrypted reveal-back phase.  There is
-# only one OPA/PSI call; the sender learns the result from the reveal phase.
+# Launch one two-way RF-PSI experiment: one-way RF-PSI followed by an encrypted
+# reveal-back phase.  There is one OPA/PSI call; the sender learns the result
+# from the reveal phase.
 
 source "$(cd "$(dirname "$0")" && pwd)/scripts/2pc_common.sh"
 

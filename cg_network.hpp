@@ -116,7 +116,7 @@ inline int listen_tcp(const char* port) {
         fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
         if (fd < 0) continue;
         int yes = 1;
-        // Permit immediate reruns of local demos after a previous connection.
+        // Permit immediate reruns of local demos on the same port.
         setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
         if (bind(fd, ai->ai_addr, ai->ai_addrlen) == 0) break;
         close(fd); fd = -1;

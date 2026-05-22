@@ -33,7 +33,7 @@
 
 // ── CG-AHE parameters ────────────────────────────────────────────────────
 // Defaults are production-oriented and can be overridden for benchmarking:
-//   CG_Q_NBITS=128  restores the old faster 128-bit plaintext field.
+//   CG_Q_NBITS=128  selects the 128-bit plaintext field used in the reported benchmarks.
 //   CG_K=1          is the CL_HSMqk parameter used by the current scheme.
 inline size_t cg_env_size(const char* name, size_t fallback)
 {
@@ -308,7 +308,7 @@ inline std::vector<BICYCL::Mpz> benchmark_input_vector(
     const BICYCL::Mpz& q)
 {
     // Deterministic fallback input generator for local micro-tests.  Two-machine
-    // artifact runs normally pass explicit input files instead.
+    // benchmark runs normally pass explicit input files instead.
     BICYCL::RandGen rng = make_seeded_benchmark_randgen(cg_public_seed(), domain);
     BICYCL::Mpz bound = benchmark_input_bound(q);
     std::vector<BICYCL::Mpz> out(count);
@@ -983,7 +983,7 @@ inline std::vector<BICYCL::Mpz> poly_eval_batch_horner(
     const BICYCL::Mpz& q)
 {
     // Parallel Horner evaluation at many points.  This is often faster for the
-    // artifact sizes despite worse asymptotic complexity.
+    // benchmark sizes despite worse asymptotic complexity.
     std::vector<BICYCL::Mpz> result(points.size(), BICYCL::Mpz(0UL));
     if (points.empty() || coeffs.empty()) return result;
 

@@ -55,7 +55,7 @@ echo "    receiver output = $OUT_FILE"
 echo "    n_pts (OLE calls) = $((MA + MB + 1))"
 echo "    transport lanes = $CG_RF_LANES"
 
-# Kill any stale processes on our ports
+# Stop processes bound to the demo ports before launching the pipeline.
 for port in 9001 9002 9003; do
     fuser -k "$port/tcp" 2>/dev/null || true
 done

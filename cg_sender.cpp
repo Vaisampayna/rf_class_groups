@@ -5,36 +5,26 @@
  *   Round 1 (RECV): (fpk, f⟨x_i⟩)  — re-keyed and re-randomised by firewalls
  *   Round 2 (SEND): y_i = CMult(f⟨x_i⟩, a_i) ⊞ Enc_fpk(b_i)
  *
- * Optimisations over the previous version:
+ * Implementation notes:
  *
- *   1. PRECOMPUTE PASS ELIMINATED AS A BLOCKING PHASE
- *      The previous code precomputed all Enc_fpk(b_i) in a serial loop before
- *      entering the online loop, blocking the network pipeline. Now the two
- *      QFI components of Enc_fpk(b_i) are stored in flat parallel arrays of
- *      raw QFI values (not CipherText wrappers), and they are still computed
- *      before the online loop — but see point 2 for why the blocking is now
- *      harmless and unavoidable given the current single-threaded structure.
+ *   1. PRECOMPUTED Enc_fpk(b_i) STORAGE
+ *      The two QFI components of Enc_fpk(b_i) are stored in flat parallel
+ *      arrays of raw QFI values, avoiding CipherText wrapper overhead during
+ *      the online send loop.
  *
  *   2. SINGLE CONSTRUCTION OF Mpz(b_i) / ClearText
- *      The original built Mpz bi → Mpz(bi) → ClearText — two wrapper
- *      constructions for the same value. Now a single Mpz is constructed and
- *      passed directly to ClearText.
+ *      A single Mpz is constructed and passed directly to ClearText for each
+ *      sender mask value.
  *
  *   3. RAW QFI STORAGE INSTEAD OF CipherText VECTOR
- *      u_pre stored n_oles CipherText objects. CipherText is a pair of QFIs
- *      with extra bookkeeping. Two parallel std::vector<QFI> arrays (ub1, ub2)
- *      avoid that overhead and give better cache locality during the online
- *      loop: ub1[i] and ub2[i] are accessed together and stored contiguously
- *      within each vector.
+ *      Two parallel std::vector<QFI> arrays (ub1, ub2) keep the ciphertext
+ *      components contiguous and improve cache locality in the online loop.
  *
- *   4. EVAL TIMING OVERHEAD REMOVED
- *      Two clock_gettime syscalls per OLE (wall_now_s pairs) were measuring
- *      pure-compute eval_s. At n_oles=128 that is 256 syscalls inside the hot
- *      loop. Replaced with a single before/after pair around the whole loop;
- *      eval_s now measures total eval wall time rather than per-iteration
- *      accumulation, which is both cheaper and more meaningful.
+ *   4. LOOP-LEVEL EVALUATION TIMING
+ *      eval_s is measured with a single before/after pair around the online
+ *      loop, so timing overhead stays outside the per-OLE hot path.
  *
- *   5. SCRATCH QFIs HOISTED OUTSIDE LOOP (unchanged from prior version)
+ *   5. SCRATCH QFIs HOISTED OUTSIDE LOOP
  *      t_c1, t_c2, y_c1, y_c2 declared once and reused every iteration.
  *
  *   6. SEED VALUES PRECOMPUTED INTO ARRAYS

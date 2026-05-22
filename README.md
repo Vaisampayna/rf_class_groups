@@ -7,6 +7,13 @@ protocols over Class-Group additively homomorphic encryption:
 - RF-OPA: oblivious polynomial addition built from batched RF-OLE.
 - RF-PSI: private set intersection built from RF-OPA.
 
+The reported experiments cover exactly these rows: batched OLE, batched RF-OLE,
+3-round OLE, 3-round RF-OLE, OPE, RF-OPE, OPA, RF-OPA, one-way PSI, one-way
+RF-PSI, direct two-way PSI, and RF two-way PSI.  The repository contains the
+implementation and scripts for these rows; generated benchmark outputs,
+alternate experiments, LWE comparison scripts, and paper-source files are not
+part of the anonymous artifact.
+
 The CG-AHE wrapper and BICYCL headers used by the demos are included under
 `third_party/cg_ahe`, making the artifact self-contained for building and
 reproducing the experiments.
@@ -27,15 +34,15 @@ cmake -S . -B build
 cmake --build build -j
 ```
 
-The CMake build creates both the active batched RF-OLE binaries and the local
-OLE/OPA/PSI demo binaries used by the scripts.
+The CMake build creates the reported OLE/OPE/OPA/PSI binaries and the local
+correctness helpers used by the scripts.
 
 ## Quick Runs
 
-Single OLE:
+Batched RF-OLE:
 
 ```bash
-bash run_rf_cg_ole_local.sh 5 3 7
+bash run_rf_cg_batch_ole_local.sh 100
 ```
 
 OPA:
@@ -125,15 +132,33 @@ The default is one lane, which preserves the original single-connection
 behavior. The same batched RF-OLE helper is used by RF-OPA, and RF-PSI builds on
 that RF-OPA layer.
 
+## Polynomial Layer
 
+OPA batch-evaluates the sender and receiver polynomials with a product-tree
+multipoint evaluator over the CG-AHE plaintext modulus `q`. PSI set-polynomial
+construction also uses a balanced product tree for `prod(X - item)`. The
+implemented PSI protocol samples sender masks `r_A` and `r'_A`, forms
+`q_A = p_A * r'_A`, and invokes one OPA instance so the receiver obtains
+`p_cap = q_A + r_A * p_B`. For each receiver element `beta`, `p_B(beta)=0`, so
+`p_cap(beta)=p_A(beta)r'_A(beta)` and the receiver tests for zero. The modulus
+is still the random CG plaintext prime, so this is not an NTT-specific modulus
+change.
 
 ## Main Files
 
-- `cg_receiver.cpp`, `cg_rrf.cpp`, `cg_srf.cpp`, `cg_sender.cpp`: active
-  four-process batched RF-OLE.
+- `cg_batch_ole_receiver.cpp`, `cg_batch_ole_sender.cpp`,
+  `cg_rf_batch_ole_receiver.cpp`, `cg_rf_batch_ole_sender.cpp`: batched OLE and
+  batched RF-OLE.
+- `cg_ole3_receiver.cpp`, `cg_ole3_sender.cpp`, `cg_rf_ole3_receiver.cpp`,
+  `cg_rf_ole3_sender.cpp`: 3-round OLE and 3-round RF-OLE.
+- `cg_ope_receiver.cpp`, `cg_ope_sender.cpp`, `cg_rf_ope_receiver.cpp`,
+  `cg_rf_ope_sender.cpp`: OPE and RF-OPE.
+- `cg_opa_receiver.cpp`, `cg_opa_sender.cpp`, `cg_rf_opa_receiver.cpp`,
+  `cg_rf_opa_sender.cpp`: OPA and RF-OPA.
 - `cg_rf_ole_batch.hpp`: shared batched RF-OLE endpoint helper for OPA/PSI.
 - `cg_rf_opa.hpp`: RF-OPA reduction to batched RF-OLE.
 - `cg_rf_psi_sender.cpp`, `cg_rf_psi_receiver.cpp`: RF-PSI reduction to RF-OPA.
+- `cg_psi_sender.cpp`, `cg_psi_receiver.cpp`: direct one-way PSI.
 - `cg_psi2_sender.cpp`, `cg_psi2_receiver.cpp`: direct two-way PSI, implemented
   as direct one-way PSI followed by a clear reveal-back of the intersection.
 - `cg_rf_psi2_reveal_sender.cpp`, `cg_rf_psi2_reveal_receiver.cpp`,
@@ -141,13 +166,11 @@ that RF-OPA layer.
   reveal-back phase.
 - `generate_sets.py`, `check_correctness.py`: 128-bit plaintext PSI test-data
   generation and external receiver-output checking.
-- `cg_bench.cpp`: standalone no-socket benchmark/simulation.
 - `OPERATION_COMMENTS.md`: role-by-role protocol notes.
-
-
 
 ## Notes
 
- The localhost demo scripts use fixed ports
-`9001`, `9002`, and `9003`; make sure no old demo process is still running if a
+This is research/demo code. It favors protocol clarity and local benchmarking
+over production hardening. The localhost demo scripts use fixed ports
+`9001`, `9002`, and `9003`; make sure no demo process is still running if a
 script reports a bind/connect failure.

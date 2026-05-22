@@ -88,7 +88,7 @@ run_pair() {
     cleanup_ports
     local start end elapsed lr rr
     # Outer elapsed includes SSH/process overhead.  It remains useful for
-    # artifact reproducibility but is deliberately separated from protocol time.
+    # run reproducibility but is deliberately separated from protocol time.
     start="$(date +%s%3N)"
     set +e
     if [[ "$order" == "local_first" ]]; then

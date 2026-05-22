@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate exact two-way RF-PSI output logs for both parties.
+"""Validate two-way PSI output logs for both parties.
 
 The protocol prints each party's recovered intersection. This checker parses
 those logs and compares both outputs with the generated true intersection.

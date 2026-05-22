@@ -76,9 +76,9 @@ int main(int argc, char** argv)
     std::cerr << "[psi_receiver] benchmark set input sampling excluded from protocol time: "
               << ms_since(t_input) << " ms\n";
 
-    // Paper-facing PSI clock: input file parsing is complete here.  The clock
-    // includes polynomial construction, OPA/OLE communication, interpolation,
-    // and the membership test; it stops before writing result/check files.
+    // Protocol timing starts after input file parsing.  It includes polynomial
+    // construction, OPA/OLE communication, interpolation, and the membership
+    // test; it stops before writing result/check files.
     auto t_protocol = Clock::now();
     auto t_poly = Clock::now();
     size_t m_B = set_B.size();

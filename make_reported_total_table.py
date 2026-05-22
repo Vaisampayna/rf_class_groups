@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Print the paper-facing total-time table from benchmark logs.
+"""Print the total-time table from benchmark logs.
 
 For most binaries, protocol_times.csv already contains the desired per-party
-wall-clock protocol time.  Some RF-OLE/RF-OPA based binaries historically wrote
-the narrower RF-OLE online subphase.  This script reconstructs the reported
-table from the raw logs using the full wrapper call timings:
+wall-clock protocol time.  For RF-OLE/RF-OPA based wrappers with narrower
+subphase timing files, this script reconstructs full wrapper-call timings from
+the raw logs:
 
   total protocol time = max(local party time, remote party time).
 
@@ -150,7 +150,7 @@ def main():
             for n in SIZES
         ],
         "3-Round OLE": [sec(max_csv(ole3_root, f"direct_ole3_{n}")) for n in SIZES],
-        r"3-Round RF OLE ($\FsOLE$)": [sec(max_csv(ole3_root, f"rf_ole3_{n}")) for n in SIZES],
+        "3-Round RF OLE": [sec(max_csv(ole3_root, f"rf_ole3_{n}")) for n in SIZES],
         "OPE": [sec(max_csv(cg_root, f"direct_ope_{n}")) for n in SIZES],
         "RF OPE": [sec(max_csv(cg_root, f"rf_ope_{n}")) for n in SIZES],
         "OPA": [sec(max_csv(cg_root, f"direct_opa_{n}")) for n in SIZES],

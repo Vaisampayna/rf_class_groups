@@ -35,7 +35,7 @@ using namespace BICYCL;
 using namespace CG_AHE;
 
 // Production defaults for the legacy single-OLE binaries. Use
-// CG_Q_NBITS=128 to reproduce old benchmark timings.
+// CG_Q_NBITS=128 is the setting used for the reported benchmark timings.
 static inline size_t cg_common_env_size(const char* name, size_t fallback) {
     const char* env = getenv(name);
     if (!env || !*env) return fallback;

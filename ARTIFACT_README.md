@@ -4,6 +4,15 @@ This artifact contains the implementation used for the reported CG-AHE
 reverse-firewall experiments.  The benchmark configuration used for the paper
 is:
 
+Reported rows:
+
+- Batched OLE and batched RF-OLE
+- 3-round OLE and 3-round RF-OLE
+- OPE and RF-OPE
+- OPA and RF-OPA
+- Direct one-way PSI and RF one-way PSI
+- Direct two-way PSI and RF two-way PSI
+
 - `CG_Q_NBITS=128`
 - `CG_K=1`
 - `CG_BENCH_INPUT_BITS=128`

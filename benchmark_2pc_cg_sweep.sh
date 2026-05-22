@@ -31,7 +31,7 @@ CG_RF_CHUNK_SIZE="${CG_RF_CHUNK_SIZE:-128}"
 CG_CONNECT_RETRIES="${CG_CONNECT_RETRIES:-7200}"
 CG_Q_NBITS="${CG_Q_NBITS:-128}"
 CG_K="${CG_K:-1}"
-CG_BENCH_INPUT_BITS="${CG_BENCH_INPUT_BITS:-128}"
+CG_BENCH_INPUT_BITS="${CG_BENCH_INPUT_BITS:-64}"
 TIMEOUT_S="${TIMEOUT_S:-3600}"
 
 common_env() {
@@ -48,45 +48,10 @@ ssh_remote() {
 }
 
 cleanup_ports() {
-    local ports=(9001 9002 9003 9004 9010 9021 9022 9023 9041 9042 9043 9103 9104)
+    local ports=(9001 9002 9003 9004 9010 9021 9022 9023 9103 9104)
     ssh_local "fuser -k ${ports[*]/%//tcp} >/dev/null 2>&1 || true" >/dev/null 2>&1 || true
     ssh_remote "fuser -k ${ports[*]/%//tcp} >/dev/null 2>&1 || true" >/dev/null 2>&1 || true
     sleep 1
-}
-
-record_protocol_time() {
-    local name="$1"
-    local side="$2"
-    local src="$3"
-    local dst="$4"
-    local line component ms
-
-    if [[ ! -s "$dst" ]]; then
-        return 0
-    fi
-    line="$(awk -F, 'NF >= 3 && $1 != "component" { last = $0 } END { print last }' "$dst")"
-    component="$(awk -F, '{print $1}' <<<"$line")"
-    ms="$(awk -F, '{print $3}' <<<"$line")"
-    if [[ -n "$component" && -n "$ms" ]]; then
-        printf '%s,%s,%s,%s,%s\n' "$name" "$side" "$component" "$ms" "$src" >>"$OUT_DIR/protocol_times.csv"
-    fi
-}
-
-collect_protocol_times() {
-    local name="$1"
-    local local_timing="$2"
-    local remote_timing="$3"
-    local out="$IO_DIR/$name"
-
-    mkdir -p "$out"
-    if ssh_local "test -s '$local_timing'" >/dev/null 2>&1; then
-        fetch_local "$local_timing" "$out/protocol_time.csv"
-        record_protocol_time "$name" "local" "$out/protocol_time.csv" "$out/protocol_time.csv"
-    fi
-    if ssh_remote "test -s '$remote_timing'" >/dev/null 2>&1; then
-        fetch_remote "$remote_timing" "$out/remote_protocol_time.csv"
-        record_protocol_time "$name" "remote" "$out/remote_protocol_time.csv" "$out/remote_protocol_time.csv"
-    fi
 }
 
 run_pair() {
@@ -96,33 +61,29 @@ run_pair() {
     local remote_cmd="$4"
     local local_log="$RAW_DIR/${name}_local.log"
     local remote_log="$RAW_DIR/${name}_remote.log"
-    local local_timing="/tmp/cg_protocol_time_${name}_local.csv"
-    local remote_timing="/tmp/cg_protocol_time_${name}_remote.csv"
 
     echo "==> $name"
     cleanup_ports
-    ssh_local "rm -f '$local_timing'" >/dev/null 2>&1 || true
-    ssh_remote "rm -f '$remote_timing'" >/dev/null 2>&1 || true
     local start end elapsed lr rr
     start="$(date +%s%3N)"
     set +e
     if [[ "$order" == "local_first" ]]; then
         timeout "$TIMEOUT_S" ssh -o BatchMode=yes "$LOCAL" \
-            "bash -lc $(printf '%q' "export CG_PROTOCOL_TIMING_FILE='$local_timing'; $local_cmd")" >"$local_log" 2>&1 &
+            "bash -lc $(printf '%q' "$local_cmd")" >"$local_log" 2>&1 &
         local lp=$!
         sleep 1
         timeout "$TIMEOUT_S" ssh -o BatchMode=yes "$REMOTE" \
-            "bash -lc $(printf '%q' "export CG_PROTOCOL_TIMING_FILE='$remote_timing'; $remote_cmd")" >"$remote_log" 2>&1
+            "bash -lc $(printf '%q' "$remote_cmd")" >"$remote_log" 2>&1
         rr=$?
         wait "$lp"
         lr=$?
     else
         timeout "$TIMEOUT_S" ssh -o BatchMode=yes "$REMOTE" \
-            "bash -lc $(printf '%q' "export CG_PROTOCOL_TIMING_FILE='$remote_timing'; $remote_cmd")" >"$remote_log" 2>&1 &
+            "bash -lc $(printf '%q' "$remote_cmd")" >"$remote_log" 2>&1 &
         local rp=$!
         sleep 1
         timeout "$TIMEOUT_S" ssh -o BatchMode=yes "$LOCAL" \
-            "bash -lc $(printf '%q' "export CG_PROTOCOL_TIMING_FILE='$local_timing'; $local_cmd")" >"$local_log" 2>&1
+            "bash -lc $(printf '%q' "$local_cmd")" >"$local_log" 2>&1
         lr=$?
         wait "$rp"
         rr=$?
@@ -135,7 +96,6 @@ run_pair() {
         echo "FAILED $name local=$lr remote=$rr elapsed=${elapsed}s"
         return 1
     fi
-    collect_protocol_times "$name" "$local_timing" "$remote_timing"
     echo "OK $name elapsed=${elapsed}s"
 }
 
@@ -205,7 +165,6 @@ check_ope() {
 
 printf 'name,local_rc,remote_rc,outer_elapsed_s,logs\n' >"$OUT_DIR/runs.csv"
 printf 'name,checker_rc,checker_log\n' >"$OUT_DIR/checks.csv"
-printf 'run,side,component,protocol_time_ms,source\n' >"$OUT_DIR/protocol_times.csv"
 
 ENV_LOCAL="$(common_env) CG_RF_THREADS=$CG_RF_THREADS_LOCAL"
 ENV_REMOTE="$(common_env) CG_RF_THREADS=$CG_RF_THREADS_REMOTE"
@@ -238,8 +197,8 @@ for N in "${SIZES[@]}"; do
     LOCAL_IO="/tmp/cg_rf_ope_${N}"
     REMOTE_IO="/tmp/cg_rf_ope_${N}"
     run_pair "rf_ope_${N}" "local_first" \
-        "rm -rf '$LOCAL_IO'; mkdir -p '$LOCAL_IO'; cd '$LOCAL_ROOT' && CG_BUILD_DIR='$LOCAL_ROOT/$BUILD_DIR' $ENV_LOCAL CG_BENCH_IO_DIR='$LOCAL_IO' bash ./run_rf_cg_ope_lan_receiver.sh '$N'" \
-        "rm -rf '$REMOTE_IO'; mkdir -p '$REMOTE_IO'; cd '$REMOTE_ROOT' && CG_BUILD_DIR='$REMOTE_ROOT/$BUILD_DIR' $ENV_REMOTE CG_BENCH_IO_DIR='$REMOTE_IO' bash ./run_rf_cg_ope_lan_sender.sh '$LOCAL_IP' '$N'"
+        "rm -rf '$LOCAL_IO'; mkdir -p '$LOCAL_IO'; cd '$LOCAL_ROOT/$BUILD_DIR'; export $ENV_LOCAL CG_BENCH_IO_DIR='$LOCAL_IO'; ./cg_rf_ope_receiver '$N' & ./cg_rf_receiver_firewall_opa; wait" \
+        "rm -rf '$REMOTE_IO'; mkdir -p '$REMOTE_IO'; cd '$REMOTE_ROOT/$BUILD_DIR'; export $ENV_REMOTE CG_BENCH_IO_DIR='$REMOTE_IO'; ./cg_rf_sender_firewall_opa '$LOCAL_IP' & sleep 1; ./cg_rf_ope_sender '$LOCAL_IP' '$N'; wait"
     check_ope "rf_ope_${N}" "$LOCAL_IO" "$REMOTE_IO" \
         rf_ope_sender_coeffs.txt rf_ope_receiver_output.txt
 

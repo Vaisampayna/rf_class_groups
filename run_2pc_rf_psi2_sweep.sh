@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Sweep the current two-way RF-PSI construction:
+# Sweep two-way RF-PSI:
 #   one-way RF-PSI + encrypted reveal-back phase.
 #
 # This script is intentionally separate from benchmark_2pc_cg_sweep.sh so a
 # long PSI2 sweep can be resumed or rerun without disturbing the OLE/OPE/OPA/PSI
-# table.  It preserves the same paper-facing settings used by the 128-bit CG
-# sweep unless the caller overrides them.
+# table.  It uses the same 128-bit CG benchmark defaults unless the caller
+# overrides them.
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"

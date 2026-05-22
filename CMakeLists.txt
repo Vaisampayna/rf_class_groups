@@ -63,14 +63,7 @@ cg_binary(cg_rrf       cg_rrf.cpp)
 cg_binary(cg_srf       cg_srf.cpp)
 cg_binary(cg_sender    cg_sender.cpp)
 
-# ── Benchmark binary (standalone, no network) ──────────────────
-cg_binary(cg_bench     cg_bench.cpp)
-
-# ── Older RF-OLE / RF-OPA / RF-PSI demo binaries ───────────────
-cg_binary(cg_rf_receiver               cg_rf_receiver.cpp)
-cg_binary(cg_rf_receiver_firewall      cg_rf_receiver_firewall.cpp)
-cg_binary(cg_rf_sender_firewall        cg_rf_sender_firewall.cpp)
-cg_binary(cg_rf_sender                 cg_rf_sender.cpp)
+# ── RF-OLE / RF-OPA / RF-PSI protocol binaries ─────────────────
 cg_binary(cg_rf_receiver_firewall_opa  cg_rf_receiver_firewall_opa.cpp)
 cg_binary(cg_rf_sender_firewall_opa    cg_rf_sender_firewall_opa.cpp)
 cg_binary(cg_rf_opa_receiver           cg_rf_opa_receiver.cpp)
@@ -83,15 +76,12 @@ cg_binary(cg_psi_receiver              cg_psi_receiver.cpp)
 cg_binary(cg_psi_sender                cg_psi_sender.cpp)
 cg_binary(cg_psi2_receiver             cg_psi2_receiver.cpp)
 cg_binary(cg_psi2_sender               cg_psi2_sender.cpp)
-cg_binary(cg_rf_psi2_sim               cg_rf_psi2_sim.cpp)
-# Current two-way PSI is one-way RF-PSI plus a reveal-back phase, not the older
-# two-RF-OPA construction.  The reveal binaries below are the only PSI2 party
-# endpoints used by run_rf_cg_psi2_lan_{a,b}.sh and the 2PC benchmark scripts.
+# Two-way RF-PSI uses one-way RF-PSI followed by the reveal-back endpoints
+# used by run_rf_cg_psi2_lan_{a,b}.sh and the 2PC benchmark scripts.
 cg_binary(cg_rf_psi2_reveal_sender     cg_rf_psi2_reveal_sender.cpp)
 cg_binary(cg_rf_psi2_reveal_receiver   cg_rf_psi2_reveal_receiver.cpp)
 cg_binary(cg_rf_psi2_reveal_srf        cg_rf_psi2_reveal_srf.cpp)
 cg_binary(cg_rf_psi2_reveal_rrf        cg_rf_psi2_reveal_rrf.cpp)
-cg_binary(cg_psi_poly_compare          cg_psi_poly_compare.cpp)
 
 # ── Batched OLE test binaries ──────────────────────────────────
 cg_binary(cg_batch_ole_receiver        cg_batch_ole_receiver.cpp)
@@ -112,6 +102,3 @@ cg_binary(cg_check_batch_ole           cg_check_batch_ole.cpp)
 cg_binary(cg_check_ope                 cg_check_ope.cpp)
 cg_binary(cg_check_opa                 cg_check_opa.cpp)
 cg_binary(cg_print_q                   cg_print_q.cpp)
-
-# ── RF Microbenchmark ──────────────────────────────────────────
-cg_binary(cg_rf_microbench             cg_rf_microbench.cpp)
