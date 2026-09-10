@@ -47,6 +47,8 @@ inline size_t cg_env_size(const char* name, size_t fallback)
 static const size_t        CG_Q_NBITS   = cg_env_size("CG_Q_NBITS", 256);
 static const size_t        CG_K         = cg_env_size("CG_K", 1);
 static const BICYCL::SecLevel  CG_SECLEVEL  = BICYCL::SecLevel::_128;
+static constexpr const char* CG_NTT128_PRIME_DEC =
+    "170141183460469232709364739622490341377";
 
 // ── Port layout ───────────────────────────────────────────────────────────
 //  Receiver :9003  ←RF_R:9002←  RF_S :9001  ←Sender(client)
@@ -141,8 +143,22 @@ inline CG_AHE::CG_Scheme make_cg_scheme(BICYCL::RandGen& runtime_randgen)
     // Public parameters must match across parties; keygen/encryption randomness
     // comes from runtime_randgen, which should be a secure per-process RNG.
     BICYCL::RandGen public_randgen = make_public_param_randgen();
+    const char* fixed_q = std::getenv("CG_FIXED_Q");
+    if (fixed_q && *fixed_q) {
+        BICYCL::Mpz q(fixed_q);
+        return CG_AHE::CG_Scheme(q, CG_K, CG_SECLEVEL,
+                                 public_randgen, runtime_randgen);
+    }
     return CG_AHE::CG_Scheme(CG_Q_NBITS, CG_K, CG_SECLEVEL,
                              public_randgen, runtime_randgen);
+}
+
+inline void enable_psi_ntt_plaintext_prime()
+{
+    // 128-bit NTT prime q = 9223372036854775861 * 2^64 + 1.  It is prime,
+    // satisfies q = 1 mod 2^64, and meets BICYCL's 128-bit plaintext-q check.
+    if (!std::getenv("CG_FIXED_Q"))
+        setenv("CG_FIXED_Q", CG_NTT128_PRIME_DEC, 0);
 }
 
 inline BICYCL::RandGen& thread_secure_randgen()
@@ -300,6 +316,12 @@ inline void write_protocol_timing_file_from_env(
     const char* path = std::getenv("CG_PROTOCOL_TIMING_FILE");
     if (path && *path)
         write_protocol_timing_file(path, component, protocol_time_ms);
+}
+
+inline bool cg_profile_ops_enabled()
+{
+    const char* env = std::getenv("CG_PROFILE_OPS");
+    return env && *env && std::string(env) != "0";
 }
 
 inline std::vector<BICYCL::Mpz> benchmark_input_vector(
@@ -527,6 +549,134 @@ inline void poly_mod_q_inplace(std::vector<BICYCL::Mpz>& p, const BICYCL::Mpz& q
     poly_trim(p);
 }
 
+inline bool is_power_of_two_size(size_t n)
+{
+    return n != 0 && (n & (n - 1)) == 0;
+}
+
+inline size_t next_power_of_two_size(size_t n)
+{
+    if (n <= 1) return 1;
+    size_t p = 1;
+    while (p < n) {
+        if (p > (std::numeric_limits<size_t>::max() >> 1))
+            throw std::runtime_error("next_power_of_two_size: size overflow");
+        p <<= 1;
+    }
+    return p;
+}
+
+inline bool ntt_runtime_enabled()
+{
+    const char* env = std::getenv("CG_USE_NTT_POLY");
+    return !(env && *env && std::string(env) == "0");
+}
+
+inline bool is_ntt128_prime(const BICYCL::Mpz& q)
+{
+    return q == BICYCL::Mpz(CG_NTT128_PRIME_DEC);
+}
+
+inline bool ntt_domain_supported(const BICYCL::Mpz& q, size_t n)
+{
+    return ntt_runtime_enabled() && is_ntt128_prime(q) && is_power_of_two_size(n);
+}
+
+inline BICYCL::Mpz ntt_primitive_root(size_t n, const BICYCL::Mpz& q)
+{
+    if (!ntt_domain_supported(q, n))
+        throw std::runtime_error("ntt_primitive_root: unsupported q or domain size");
+    if (n == 1)
+        return BICYCL::Mpz(1UL);
+
+    BICYCL::Mpz exp;
+    BICYCL::Mpz::sub(exp, q, BICYCL::Mpz(1UL));
+    BICYCL::Mpz::divexact(exp, exp, (unsigned long)n);
+
+    BICYCL::Mpz root;
+    BICYCL::Mpz::pow_mod(root, BICYCL::Mpz(3UL), exp, q);
+
+    BICYCL::Mpz check;
+    BICYCL::Mpz::pow_mod(check, root, BICYCL::Mpz((unsigned long)n), q);
+    if (check != BICYCL::Mpz(1UL))
+        throw std::runtime_error("ntt_primitive_root: root order check failed");
+    BICYCL::Mpz::pow_mod(check, root, BICYCL::Mpz((unsigned long)(n / 2)), q);
+    if (check == BICYCL::Mpz(1UL))
+        throw std::runtime_error("ntt_primitive_root: non-primitive root");
+    return root;
+}
+
+inline std::vector<BICYCL::Mpz> ntt_domain_points(size_t n, const BICYCL::Mpz& q)
+{
+    std::vector<BICYCL::Mpz> points(n, BICYCL::Mpz(1UL));
+    if (n == 0) return points;
+    BICYCL::Mpz omega = ntt_primitive_root(n, q);
+    for (size_t i = 1; i < n; ++i) {
+        BICYCL::Mpz::mul(points[i], points[i - 1], omega);
+        BICYCL::Mpz::mod(points[i], points[i], q);
+    }
+    return points;
+}
+
+inline void ntt_inplace(std::vector<BICYCL::Mpz>& a, const BICYCL::Mpz& q, bool inverse)
+{
+    const size_t n = a.size();
+    if (!ntt_domain_supported(q, n))
+        throw std::runtime_error("ntt_inplace: unsupported q or non-power-of-two size");
+
+    for (size_t i = 1, j = 0; i < n; ++i) {
+        size_t bit = n >> 1;
+        for (; j & bit; bit >>= 1)
+            j ^= bit;
+        j ^= bit;
+        if (i < j)
+            std::swap(a[i], a[j]);
+    }
+
+    for (size_t len = 2; len <= n; len <<= 1) {
+        BICYCL::Mpz wlen = ntt_primitive_root(len, q);
+        if (inverse)
+            BICYCL::Mpz::mod_inverse(wlen, wlen, q);
+
+        for (size_t i = 0; i < n; i += len) {
+            BICYCL::Mpz w(1UL);
+            for (size_t j = 0; j < len / 2; ++j) {
+                BICYCL::Mpz u = a[i + j];
+                BICYCL::Mpz v;
+                BICYCL::Mpz::mul(v, a[i + j + len / 2], w);
+                BICYCL::Mpz::mod(v, v, q);
+
+                BICYCL::Mpz::add(a[i + j], u, v);
+                BICYCL::Mpz::mod(a[i + j], a[i + j], q);
+
+                BICYCL::Mpz::sub(a[i + j + len / 2], u, v);
+                BICYCL::Mpz::mod(a[i + j + len / 2], a[i + j + len / 2], q);
+
+                BICYCL::Mpz::mul(w, w, wlen);
+                BICYCL::Mpz::mod(w, w, q);
+            }
+        }
+    }
+
+    if (inverse) {
+        BICYCL::Mpz n_inv;
+        BICYCL::Mpz::mod_inverse(n_inv, BICYCL::Mpz((unsigned long)n), q);
+        for (auto& x : a) {
+            BICYCL::Mpz::mul(x, x, n_inv);
+            BICYCL::Mpz::mod(x, x, q);
+        }
+    }
+}
+
+inline size_t ntt_poly_threshold()
+{
+    const char* env = std::getenv("CG_NTT_POLY_THRESHOLD");
+    if (!env || !*env) return 512;
+    char* end = nullptr;
+    unsigned long v = std::strtoul(env, &end, 10);
+    return (end == env) ? 512 : (size_t)v;
+}
+
 inline std::vector<BICYCL::Mpz> poly_slice(
     const std::vector<BICYCL::Mpz>& p,
     size_t begin,
@@ -670,6 +820,40 @@ inline std::vector<BICYCL::Mpz> poly_mul_ntl_mod(
 }
 #endif
 
+inline std::vector<BICYCL::Mpz> poly_mul_ntt_mod(
+    const std::vector<BICYCL::Mpz>& a,
+    const std::vector<BICYCL::Mpz>& b,
+    const BICYCL::Mpz& q)
+{
+    if (a.empty() || b.empty()) return {BICYCL::Mpz(0UL)};
+    const size_t need = a.size() + b.size() - 1;
+    const size_t n = next_power_of_two_size(need);
+    if (!ntt_domain_supported(q, n))
+        throw std::runtime_error("poly_mul_ntt_mod: unsupported NTT domain");
+
+    std::vector<BICYCL::Mpz> fa(n, BICYCL::Mpz(0UL));
+    std::vector<BICYCL::Mpz> fb(n, BICYCL::Mpz(0UL));
+    for (size_t i = 0; i < a.size(); ++i) {
+        fa[i] = a[i];
+        BICYCL::Mpz::mod(fa[i], fa[i], q);
+    }
+    for (size_t i = 0; i < b.size(); ++i) {
+        fb[i] = b[i];
+        BICYCL::Mpz::mod(fb[i], fb[i], q);
+    }
+
+    ntt_inplace(fa, q, false);
+    ntt_inplace(fb, q, false);
+    for (size_t i = 0; i < n; ++i) {
+        BICYCL::Mpz::mul(fa[i], fa[i], fb[i]);
+        BICYCL::Mpz::mod(fa[i], fa[i], q);
+    }
+    ntt_inplace(fa, q, true);
+    fa.resize(need);
+    poly_trim(fa);
+    return fa;
+}
+
 inline std::vector<BICYCL::Mpz> poly_mul_mod(
     const std::vector<BICYCL::Mpz>& a,
     const std::vector<BICYCL::Mpz>& b,
@@ -678,6 +862,10 @@ inline std::vector<BICYCL::Mpz> poly_mul_mod(
     // Karatsuba-style recursive multiplication above the cutoff, naive below.
     static constexpr size_t KARATSUBA_CUTOFF = 32;
     if (a.empty() || b.empty()) return {BICYCL::Mpz(0UL)};
+    const size_t ntt_n = next_power_of_two_size(a.size() + b.size() - 1);
+    if (std::max(a.size(), b.size()) >= ntt_poly_threshold()
+        && ntt_domain_supported(q, ntt_n))
+        return poly_mul_ntt_mod(a, b, q);
 #if defined(CG_USE_NTL_POLY)
     if (ntl_poly_enabled() && std::max(a.size(), b.size()) >= ntl_poly_threshold())
         return poly_mul_ntl_mod(a, b, q);
@@ -776,32 +964,41 @@ inline std::string public_poly_cache_key(size_t n, const BICYCL::Mpz& q)
     return oss.str();
 }
 
-inline const std::vector<BICYCL::Mpz>& public_eval_points_cached(size_t n)
+inline const std::vector<BICYCL::Mpz>& public_eval_points_cached(
+    size_t n,
+    const BICYCL::Mpz& q)
 {
-    // Public OPA/PSI points are always alpha_i=i+1.  Cache them by n so repeat
-    // OPA/PSI calls do not rebuild the same vector.
+    // Public OPA/PSI points use an NTT roots-of-unity domain when the fixed
+    // 128-bit NTT prime and a power-of-two point count are active.  Otherwise
+    // they fall back to alpha_i=i+1 for legacy OPA sizes.
     static std::mutex cache_mu;
-    static std::unordered_map<size_t, std::vector<BICYCL::Mpz>> cache;
+    static std::unordered_map<std::string, std::vector<BICYCL::Mpz>> cache;
 
+    const std::string key = public_poly_cache_key(n, q);
     std::lock_guard<std::mutex> lock(cache_mu);
-    auto found = cache.find(n);
+    auto found = cache.find(key);
     if (found != cache.end())
         return found->second;
 
-    std::vector<BICYCL::Mpz> alpha(n);
-    for (size_t i = 0; i < n; ++i)
-        alpha[i] = BICYCL::Mpz((unsigned long)(i + 1));
-    auto inserted = cache.emplace(n, std::move(alpha));
+    std::vector<BICYCL::Mpz> alpha;
+    if (ntt_domain_supported(q, n)) {
+        alpha = ntt_domain_points(n, q);
+    } else {
+        alpha.resize(n);
+        for (size_t i = 0; i < n; ++i)
+            alpha[i] = BICYCL::Mpz((unsigned long)(i + 1));
+    }
+    auto inserted = cache.emplace(key, std::move(alpha));
     return inserted.first->second;
 }
 
 inline bool is_public_eval_points(
-    const std::vector<BICYCL::Mpz>& points)
+    const std::vector<BICYCL::Mpz>& points,
+    const BICYCL::Mpz& q)
 {
-    // Detect the standard alpha_i=i+1 points so generic multipoint evaluation
-    // can reuse the cached public subproduct tree.
+    const auto& public_points = public_eval_points_cached(points.size(), q);
     for (size_t i = 0; i < points.size(); ++i) {
-        if (points[i] != BICYCL::Mpz((unsigned long)(i + 1)))
+        if (points[i] != public_points[i])
             return false;
     }
     return true;
@@ -822,7 +1019,7 @@ inline const PolyProductTree& public_product_tree_cached(
     if (found != cache.end())
         return found->second;
 
-    PolyProductTree tree = poly_build_product_tree(public_eval_points_cached(n), q);
+    PolyProductTree tree = poly_build_product_tree(public_eval_points_cached(n, q), q);
     auto inserted = cache.emplace(key, std::move(tree));
     return inserted.first->second;
 }
@@ -948,7 +1145,7 @@ inline std::vector<BICYCL::Mpz> poly_eval_batch_product_tree(
     // public OPA/PSI points alpha_i=i+1 reuse a cached tree keyed by (N, q).
     if (points.empty())
         return std::vector<BICYCL::Mpz>();
-    if (is_public_eval_points(points))
+    if (is_public_eval_points(points, q))
         return poly_eval_batch_with_product_tree(
             coeffs, public_product_tree_cached(points.size(), q), points.size(), q);
 
@@ -977,6 +1174,38 @@ inline std::vector<BICYCL::Mpz> poly_eval_batch_ntl(
 }
 #endif
 
+inline std::vector<BICYCL::Mpz> poly_eval_batch_ntt(
+    const std::vector<BICYCL::Mpz>& coeffs,
+    size_t n_points,
+    const BICYCL::Mpz& q)
+{
+    if (!ntt_domain_supported(q, n_points))
+        throw std::runtime_error("poly_eval_batch_ntt: unsupported NTT domain");
+    if (coeffs.size() > n_points)
+        throw std::runtime_error("poly_eval_batch_ntt: polynomial degree exceeds NTT domain");
+    std::vector<BICYCL::Mpz> values(n_points, BICYCL::Mpz(0UL));
+    for (size_t i = 0; i < coeffs.size(); ++i) {
+        values[i] = coeffs[i];
+        BICYCL::Mpz::mod(values[i], values[i], q);
+    }
+    ntt_inplace(values, q, false);
+    return values;
+}
+
+inline std::vector<BICYCL::Mpz> lagrange_interpolate_ntt(
+    const std::vector<BICYCL::Mpz>& y,
+    const BICYCL::Mpz& q)
+{
+    if (!ntt_domain_supported(q, y.size()))
+        throw std::runtime_error("lagrange_interpolate_ntt: unsupported NTT domain");
+    std::vector<BICYCL::Mpz> coeffs = y;
+    for (auto& c : coeffs)
+        BICYCL::Mpz::mod(c, c, q);
+    ntt_inplace(coeffs, q, true);
+    poly_trim(coeffs);
+    return coeffs;
+}
+
 inline std::vector<BICYCL::Mpz> poly_eval_batch_horner(
     const std::vector<BICYCL::Mpz>& coeffs,
     const std::vector<BICYCL::Mpz>& points,
@@ -999,17 +1228,21 @@ inline std::vector<BICYCL::Mpz> poly_eval_batch_horner(
 inline size_t poly_eval_auto_horner_max_points()
 {
     // Tuning knob for auto evaluation: below this many points, prefer Horner.
+    // The generic product-tree path has high BICYCL/GMP object overhead for the
+    // PSI sizes in this artifact.  Logs from the 128-bit NTT runs show Horner
+    // around 16K targets is still much faster than switching at 32K, so keep
+    // the default on the empirically better path unless callers override it.
     const char* env = std::getenv("CG_POLY_HORNER_MAX_POINTS");
-    if (!env || !*env) return 16384;
+    if (!env || !*env) return 65536;
     char* end = nullptr;
     unsigned long v = std::strtoul(env, &end, 10);
-    if (end == env) return 16384;
+    if (end == env) return 65536;
     return (size_t)v;
 }
 
 inline std::string poly_eval_method_env()
 {
-    // Optional override: auto, horner, multipoint, or product_tree.
+    // Optional override: auto, ntt, horner, multipoint, or product_tree.
     const char* env = std::getenv("CG_POLY_EVAL_METHOD");
     return (env && *env) ? std::string(env) : std::string("auto");
 }
@@ -1021,6 +1254,11 @@ inline std::vector<BICYCL::Mpz> poly_eval_batch_auto(
 {
     // Select the polynomial evaluation strategy used by OPA/PSI.
     const std::string method = poly_eval_method_env();
+    if (method == "ntt") {
+        if (!is_public_eval_points(points, q))
+            throw std::runtime_error("CG_POLY_EVAL_METHOD=ntt requires public NTT points");
+        return poly_eval_batch_ntt(coeffs, points.size(), q);
+    }
     if (method == "horner")
         return poly_eval_batch_horner(coeffs, points, q);
 #if defined(CG_USE_NTL_POLY)
@@ -1033,6 +1271,10 @@ inline std::vector<BICYCL::Mpz> poly_eval_batch_auto(
         std::cerr << "[poly_eval] unknown CG_POLY_EVAL_METHOD='" << method
                   << "', using auto\n";
 
+    if (ntt_domain_supported(q, points.size()) && coeffs.size() <= points.size()
+        && is_public_eval_points(points, q))
+        return poly_eval_batch_ntt(coeffs, points.size(), q);
+
     if (points.size() <= poly_eval_auto_horner_max_points())
         return poly_eval_batch_horner(coeffs, points, q);
 #if defined(CG_USE_NTL_POLY)
@@ -1042,11 +1284,27 @@ inline std::vector<BICYCL::Mpz> poly_eval_batch_auto(
     return poly_eval_batch_product_tree(coeffs, points, q);
 }
 
+inline std::vector<BICYCL::Mpz> rf_opa_eval_points(
+    size_t n_pts,
+    const BICYCL::Mpz& q)
+{
+    const auto& alpha = public_eval_points_cached(n_pts, q);
+    return std::vector<BICYCL::Mpz>(alpha.begin(), alpha.end());
+}
+
 inline std::vector<BICYCL::Mpz> rf_opa_eval_points(size_t n_pts)
 {
-    // Public OPA interpolation points alpha_i = i + 1.
-    const auto& alpha = public_eval_points_cached(n_pts);
-    return std::vector<BICYCL::Mpz>(alpha.begin(), alpha.end());
+    std::vector<BICYCL::Mpz> alpha(n_pts);
+    for (size_t i = 0; i < n_pts; ++i)
+        alpha[i] = BICYCL::Mpz((unsigned long)(i + 1));
+    return alpha;
+}
+
+inline size_t psi_opa_point_count(size_t degree_bound_plus_one, const BICYCL::Mpz& q)
+{
+    if (ntt_runtime_enabled() && is_ntt128_prime(q))
+        return next_power_of_two_size(degree_bound_plus_one);
+    return degree_bound_plus_one;
 }
 
 inline void require_public_eval_points_distinct(size_t n_pts, const BICYCL::Mpz& q)
@@ -1093,7 +1351,7 @@ inline std::vector<BICYCL::Mpz> lagrange_interpolate_from_tree(
 
     const std::vector<BICYCL::Mpz>& P = tree.levels.back().front();
     std::vector<BICYCL::Mpz> P_deriv = poly_derivative_mod(P, q);
-    std::vector<BICYCL::Mpz> denom = poly_eval_batch_product_tree(P_deriv, rf_opa_eval_points(N), q);
+    std::vector<BICYCL::Mpz> denom = poly_eval_batch_product_tree(P_deriv, rf_opa_eval_points(N, q), q);
 
     std::vector<std::vector<BICYCL::Mpz>> acc(N);
     global_pool().parallel_for(0, N, [&](size_t i) {
@@ -1128,13 +1386,16 @@ inline std::vector<BICYCL::Mpz> lagrange_interpolate_public_points(
     const std::vector<BICYCL::Mpz>& y,
     const BICYCL::Mpz& q)
 {
-    // Interpolate from values at the standard public points alpha_i = i + 1.
+    // Interpolate from values at the active public points.  For the fixed
+    // 128-bit NTT prime and power-of-two PSI domains this is just an inverse NTT.
+    if (ntt_domain_supported(q, y.size()))
+        return lagrange_interpolate_ntt(y, q);
 #if defined(CG_USE_NTL_POLY)
     if (ntl_poly_enabled() && y.size() >= ntl_poly_threshold()) {
         NTL::ZZ_pPush push(ntl_zz_from_mpz(q));
         NTL::ZZ_pX p;
         NTL::interpolate(p,
-                         ntl_vec_from_mpz_vec(rf_opa_eval_points(y.size())),
+                         ntl_vec_from_mpz_vec(rf_opa_eval_points(y.size(), q)),
                          ntl_vec_from_mpz_vec(y));
         return mpz_vec_from_ntl_poly(p);
     }
@@ -1275,6 +1536,19 @@ inline std::vector<BICYCL::Mpz> lagrange_eval_batch_auto(
     const size_t threshold = psi_lagrange_to_coeff_threshold();
     if (y.size() == 0 || targets.size() == 0)
         return std::vector<BICYCL::Mpz>(targets.size(), BICYCL::Mpz(0UL));
+
+    if (ntt_domain_supported(q, y.size())) {
+        auto t0 = Clock::now();
+        std::vector<BICYCL::Mpz> coeffs = lagrange_interpolate_ntt(y, q);
+        std::cerr << "[psi_poly] inverse NTT interpolated public-point values to "
+                  << coeffs.size() << " coefficients in " << ms_since(t0) << " ms\n";
+
+        t0 = Clock::now();
+        std::vector<BICYCL::Mpz> out = poly_eval_batch_auto(coeffs, targets, q);
+        std::cerr << "[psi_poly] evaluated NTT-interpolated polynomial at "
+                  << targets.size() << " PSI elements in " << ms_since(t0) << " ms\n";
+        return out;
+    }
 
     if (std::max(y.size(), targets.size()) < threshold)
         return lagrange_eval_batch(y, targets, q);
