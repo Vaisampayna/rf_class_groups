@@ -11,8 +11,7 @@ The reported experiments cover exactly these rows: batched OLE, batched RF-OLE,
 3-round OLE, 3-round RF-OLE, OPE, RF-OPE, OPA, RF-OPA, one-way PSI, one-way
 RF-PSI, direct two-way PSI, and RF two-way PSI.  The repository contains the
 implementation and scripts for these rows; generated benchmark outputs,
-alternate experiments, LWE comparison scripts, and paper-source files are not
-part of the anonymous artifact.
+alternate experiments.
 
 The CG-AHE wrapper and BICYCL headers used by the demos are included under
 `third_party/cg_ahe`, making the artifact self-contained for building and
