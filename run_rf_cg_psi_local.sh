@@ -3,7 +3,7 @@
 #
 # Usage:
 #   bash run_rf_cg_psi_local.sh [m_A] [m_B] [overlap] [seed]
-#   bash run_rf_cg_psi_local.sh --files set_A.txt set_B.txt true_intersection.txt
+#   bash run_rf_cg_psi_local.sh [--no-check] --files set_A.txt set_B.txt [true_intersection.txt]
 
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -13,6 +13,11 @@ if [[ ! -x "$BUILD_DIR/cg_rf_psi_receiver" || ! -x "$BUILD_DIR/cg_rf_psi_sender"
 fi
 cd "$BUILD_DIR"
 
+SKIP_CHECK="${CG_SKIP_CHECKS:-${CG_SKIP_CHECK:-0}}"
+if [[ "${1:-}" == "--no-check" ]]; then
+    SKIP_CHECK=1
+    shift
+fi
 ARG1="${1:-100}"
 ARG2="${2:-100}"
 SEED="${4:-42}"
@@ -20,6 +25,7 @@ export CG_RF_LANES="${CG_RF_LANES:-2}"
 export CG_Q_NBITS="${CG_Q_NBITS:-128}"
 export CG_K="${CG_K:-1}"
 export CG_BENCH_INPUT_BITS="${CG_BENCH_INPUT_BITS:-128}"
+export CG_FIXED_Q="${CG_FIXED_Q:-170141183460469232709364739622490341377}"
 
 LOG_DIR="$ROOT/logs"
 INPUT_DIR="${CG_PSI_INPUT_DIR:-$ROOT/inputs/psi}"
@@ -30,7 +36,7 @@ rm -f "$LOG_DIR"/psi_receiver.log "$LOG_DIR"/psi_sender.log \
 if [[ "$ARG1" == "--files" ]]; then
     SET_A_FILE="${2:?missing set_A file}"
     SET_B_FILE="${3:?missing set_B file}"
-    TRUE_FILE="${4:?missing true intersection file}"
+    TRUE_FILE="${4:-}"
 else
     MA="$ARG1"
     MB="$ARG2"
@@ -40,7 +46,7 @@ else
     SET_B_FILE="$INPUT_DIR/set_B.txt"
     TRUE_FILE="$INPUT_DIR/true_intersection.txt"
     python3 "$ROOT/generate_sets.py" "$MA" "$MB" "$OVERLAP" \
-        "$SET_A_FILE" "$SET_B_FILE" "$TRUE_FILE" "$SEED" 128
+        "$SET_A_FILE" "$SET_B_FILE" "$TRUE_FILE" "$SEED" 128 "$CG_FIXED_Q"
 fi
 MA="$(wc -w <"$SET_A_FILE")"
 MB="$(wc -w <"$SET_B_FILE")"
@@ -50,8 +56,13 @@ rm -f "$OUT_FILE"
 echo "=== CG-AHE RF-PSI (file inputs, 128-bit plaintexts) ==="
 echo "    S_A file = $SET_A_FILE (m_A=$MA)"
 echo "    S_B file = $SET_B_FILE (m_B=$MB)"
-echo "    true file = $TRUE_FILE"
+if [[ -n "$TRUE_FILE" ]]; then
+    echo "    true file = $TRUE_FILE"
+else
+    echo "    true file = not supplied; checker disabled"
+fi
 echo "    receiver output = $OUT_FILE"
+echo "    plaintext q = $CG_FIXED_Q"
 echo "    n_pts (OLE calls) = $((MA + MB + 1))"
 echo "    transport lanes = $CG_RF_LANES"
 
@@ -97,7 +108,13 @@ done
 
 echo "=== PSI Results ==="
 cat "$LOG_DIR/psi_receiver.log"
-python3 "$ROOT/check_correctness.py" "$TRUE_FILE" "$OUT_FILE"
+if [[ "$SKIP_CHECK" == "1" ]]; then
+    echo "Correctness checker disabled."
+elif [[ -n "$TRUE_FILE" ]]; then
+    python3 "$ROOT/check_correctness.py" "$TRUE_FILE" "$OUT_FILE"
+else
+    echo "No true intersection file supplied; skipping external correctness check."
+fi
 echo ""
 echo "=== Timing Details ==="
 grep -E "precomp|online stream|done in|n_pts" \
