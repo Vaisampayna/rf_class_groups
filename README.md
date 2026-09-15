@@ -1,4 +1,4 @@
-# Class-Group Reverse-Firewall OLE / OPA / PSI
+# Class-Group Reverse-Firewall OLE / OPE / OPA / 1 WAY PSI / 2 WAY PSI
 
 This folder is a standalone C++17 demo/benchmark package for reverse-firewalled
 protocols over Class-Group additively homomorphic encryption:
