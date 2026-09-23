@@ -108,7 +108,7 @@ write_combined_timing() {
         return 0
     fi
     local total
-    total=$(awk -F, 'NR > 1 { s += $3 } END { printf "%.6f", s }' "$first" "$second")
+    total=$(awk -F, 'FNR > 1 { s += $3 } END { printf "%.6f", s }' "$first" "$second")
     {
         echo "component,metric,value_ms"
         echo "$component,protocol_time_excluding_input_and_output_files,$total"
