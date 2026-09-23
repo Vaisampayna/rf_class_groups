@@ -7,10 +7,23 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # ── Optimisation ───────────────────────────────────────────────
 # Keep portable CPU flags by default. `-march=native` can emit instructions
 # unsupported by another LAN machine if binaries are copied between hosts.
+# For benchmark-only builds on each physical host, configure with:
+#   -DCG_ENABLE_NATIVE_ARCH=ON -DCG_ENABLE_LTO=ON
 option(CG_ENABLE_NATIVE_ARCH "Build with -march=native for this exact CPU" OFF)
+option(CG_ENABLE_LTO "Enable interprocedural/link-time optimization when supported" ON)
 add_compile_options(-O3 -funroll-loops)
 if(CG_ENABLE_NATIVE_ARCH)
     add_compile_options(-march=native)
+endif()
+if(CG_ENABLE_LTO)
+    cmake_policy(SET CMP0069 NEW)
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT cg_ipo_supported OUTPUT cg_ipo_error)
+    if(cg_ipo_supported)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
+    else()
+        message(STATUS "IPO/LTO not supported: ${cg_ipo_error}")
+    endif()
 endif()
 
 # ── Dependencies ───────────────────────────────────────────────
