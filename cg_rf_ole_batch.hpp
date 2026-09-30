@@ -33,10 +33,8 @@ inline CG_AHE::CG_Scheme& worker_cg() {
     // Keep CG-AHE state thread-local.  BICYCL objects are expensive to
     // construct, so callers prewarm the pool once and then reuse these
     // per-worker scheme instances for all crypto-heavy loops.
-    thread_local BICYCL::RandGen tl_public_rng = make_public_param_randgen();
     thread_local BICYCL::RandGen tl_rng = make_secure_randgen();
-    thread_local CG_AHE::CG_Scheme tl_cg(CG_Q_NBITS, CG_K, CG_SECLEVEL,
-                                         tl_public_rng, tl_rng);
+    thread_local CG_AHE::CG_Scheme tl_cg = make_cg_scheme(tl_rng);
     return tl_cg;
 }
 

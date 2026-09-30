@@ -64,6 +64,22 @@ public:
         : cs_(q_nbits, k, seclevel, public_param_randgen),
           randgen_(runtime_randgen) {}
 
+    /**
+     * Constructor – sets up the class-group cryptosystem with an explicit
+     * plaintext modulus q instead of sampling a random q_nbits-bit prime.
+     */
+    CG_Scheme(const Mpz& q, size_t k, SecLevel seclevel, RandGen& randgen)
+        : cs_(q, k, seclevel, randgen),
+          randgen_(randgen) {}
+
+    /**
+     * Constructor with explicit plaintext modulus q and separate randomness.
+     */
+    CG_Scheme(const Mpz& q, size_t k, SecLevel seclevel,
+              RandGen& public_param_randgen, RandGen& runtime_randgen)
+        : cs_(q, k, seclevel, public_param_randgen),
+          randgen_(runtime_randgen) {}
+
     // ── Accessors ──────────────────────────────────────────
     const CS& cs() const { return cs_; }
 

@@ -5,7 +5,8 @@ Use this machine, `<controller-ip>`, as the controller. The two protocol machine
 - Receiver side: `<party-b-user>@<party-b-ip>`
 - Sender side: `<party-a-user>@<party-a-ip>`
 
-The controller starts both remote commands over SSH, collects logs locally, and runs offline checkers from `build-portable`.
+The controller starts both remote commands over SSH, collects logs locally, and
+runs offline checkers from `build-portable`.
 
 ## 1. Check SSH
 
@@ -52,22 +53,30 @@ are Intel, but they are not the same CPU, so native instruction tuning must be
 done per host.  Do not build once and copy the `build-2pc` directory to the
 other machine.
 
+Install NTL on both protocol machines before configuring:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y build-essential cmake libgmp-dev libssl-dev libntl-dev
+```
+
 The command below enables:
 
 - `CG_ENABLE_NATIVE_ARCH=ON`: compile with `-march=native` on that machine.
+- `CG_ENABLE_LTO=ON`: enable link-time optimization when supported.
 - `CG_USE_NTL_POLY=ON`: use NTL for large PSI polynomial operations.
 - `build-2pc`: the build directory used by all 2-PC run scripts.
 
 ```bash
 ssh <party-b-user>@<party-b-ip> \
   'cd <party-b-repo-path> &&
-   cmake -S . -B build-2pc -DCG_ENABLE_NATIVE_ARCH=ON -DCG_USE_NTL_POLY=ON &&
-   cmake --build build-2pc -j2'
+   cmake -S . -B build-2pc -DCMAKE_BUILD_TYPE=Release -DCG_ENABLE_NATIVE_ARCH=ON -DCG_ENABLE_LTO=ON -DCG_USE_NTL_POLY=ON &&
+   cmake --build build-2pc -j'
 
 ssh <party-a-user>@<party-a-ip> \
   'cd <party-a-repo-path> &&
-   cmake -S . -B build-2pc -DCG_ENABLE_NATIVE_ARCH=ON -DCG_USE_NTL_POLY=ON &&
-   cmake --build build-2pc -j2'
+   cmake -S . -B build-2pc -DCMAKE_BUILD_TYPE=Release -DCG_ENABLE_NATIVE_ARCH=ON -DCG_ENABLE_LTO=ON -DCG_USE_NTL_POLY=ON &&
+   cmake --build build-2pc -j'
 ```
 
 The configure output should contain:
@@ -99,7 +108,10 @@ BUILD_DIR=build-2pc \
 CHECKER_DIR="$PWD/build-portable" \
 CG_Q_NBITS=128 \
 CG_K=1 \
+CG_FIXED_Q=170141183460469232709364739622490341377 \
+CG_USE_NTT_POLY=1 \
 CG_BENCH_INPUT_BITS=128 \
+CG_PSI_INPUT_BITS=128 \
 CG_RF_LANES=8 \
 CG_RF_THREADS_LOCAL=28 \
 CG_RF_THREADS_REMOTE=32 \
@@ -114,6 +126,8 @@ Available one-protocol scripts:
 ```bash
 bash run_2pc_direct_ole.sh 1000
 bash run_2pc_rf_ole.sh 1000
+bash run_2pc_direct_ole3.sh 1000
+bash run_2pc_rf_ole3.sh 1000
 bash run_2pc_direct_ope.sh 1000
 bash run_2pc_rf_ope.sh 1000
 bash run_2pc_direct_opa.sh 1000
@@ -149,6 +163,8 @@ runs an offline checker:
 
 ## 6. Full 2-PC sweep
 
+Recommended full paper-table sweep:
+
 ```bash
 cd <controller-repo-path>
 
@@ -162,14 +178,31 @@ BUILD_DIR=build-2pc \
 CHECKER_DIR="$PWD/build-portable" \
 CG_Q_NBITS=128 \
 CG_K=1 \
+CG_FIXED_Q=170141183460469232709364739622490341377 \
+CG_USE_NTT_POLY=1 \
 CG_BENCH_INPUT_BITS=128 \
+CG_PSI_INPUT_BITS=128 \
 CG_RF_LANES=8 \
 CG_RF_THREADS_LOCAL=28 \
 CG_RF_THREADS_REMOTE=32 \
 CG_RF_CHUNK_SIZE=128 \
 CG_CONNECT_RETRIES=7200 \
 TIMEOUT_S=7200 \
-bash benchmark_2pc_cg_sweep.sh 100 1000 2000 5000 10000
+bash benchmark_2pc_paper_all.sh
+```
+
+By default this runs `N=1024,2048,4096,8192,16384,32768`. For a shorter test,
+pass explicit sizes, for example:
+
+```bash
+bash benchmark_2pc_paper_all.sh 1024
+```
+
+The paper reports `max(local party time, remote party time)` from
+`protocol_times.csv`, not `runs.csv`. Reconstruct a paper-style table with:
+
+```bash
+python3 make_reported_total_table.py <benchmark_2pc_paper_all_...>
 ```
 
 The script prints the final `Logs: ...` path. Important files inside that directory:

@@ -92,6 +92,9 @@ def rf_psi_wall(root: Path, run: str):
 
 
 def rf_psi2_wall(root: Path, n: int):
+    csv_val = max_csv(root, f"rf_psi2_reveal_{n}")
+    if csv_val is not None:
+        return csv_val
     child = root / f"run_rf_psi2_{n}" / "raw"
     vals = []
     for side, label in (("local", "B"), ("remote", "A")):
@@ -121,32 +124,44 @@ def sec(ms):
     return None if ms is None else ms / 1000.0
 
 
+def first_value(*vals):
+    for v in vals:
+        if v is not None:
+            return v
+    return None
+
+
 def fmt_row(name, vals):
     cells = ["--" if v is None else f"{v:.2f}" for v in vals]
     return rf"\hspace{{2mm}} {name}" + "\n  & " + " & ".join(cells) + r" \\"
 
 
 def main():
-    if len(sys.argv) != 4:
+    if len(sys.argv) not in (2, 4):
         print(
-            "Usage: make_reported_total_table.py <cg_sweep_dir> <ole3_sweep_dir> <psi_fast_sweep_dir>",
+            "Usage: make_reported_total_table.py <combined_suite_dir>\n"
+            "   or: make_reported_total_table.py <cg_sweep_dir> <ole3_sweep_dir> <psi_fast_sweep_dir>",
             file=sys.stderr,
         )
         return 2
-    cg_root = Path(sys.argv[1])
-    ole3_root = Path(sys.argv[2])
-    psi_root = Path(sys.argv[3])
+    if len(sys.argv) == 2:
+        cg_root = ole3_root = psi_root = Path(sys.argv[1])
+    else:
+        cg_root = Path(sys.argv[1])
+        ole3_root = Path(sys.argv[2])
+        psi_root = Path(sys.argv[3])
 
     rows = {
         "Batched OLE": [sec(max_csv(cg_root, f"direct_batched_ole_{n}")) for n in SIZES],
         "Batched RF OLE": [
-            sec(
+            sec(first_value(
+                max_csv(cg_root, f"rf_batched_ole_{n}"),
                 max_from_logs(
                     cg_root,
                     f"rf_batched_ole_{n}",
                     rf"RF-OLE protocol (?:receive/decrypt|send/compute) phase done in {NUM} ms",
-                )
-            )
+                ),
+            ))
             for n in SIZES
         ],
         "3-Round OLE": [sec(max_csv(ole3_root, f"direct_ole3_{n}")) for n in SIZES],
@@ -154,9 +169,16 @@ def main():
         "OPE": [sec(max_csv(cg_root, f"direct_ope_{n}")) for n in SIZES],
         "RF OPE": [sec(max_csv(cg_root, f"rf_ope_{n}")) for n in SIZES],
         "OPA": [sec(max_csv(cg_root, f"direct_opa_{n}")) for n in SIZES],
-        "RF OPA": [sec(rf_opa_wall(cg_root, f"rf_opa_{n}")) for n in SIZES],
+        "RF OPA": [
+            sec(first_value(max_csv(cg_root, f"rf_opa_{n}"), rf_opa_wall(cg_root, f"rf_opa_{n}")))
+            for n in SIZES
+        ],
         "PSI": [sec(max_csv(psi_root, f"direct_psi_{n}")) for n in SIZES],
-        "RF PSI (one-way)": [sec(rf_psi_wall(psi_root, f"rf_psi_{n}")) for n in SIZES],
+        "RF PSI (one-way)": [
+            sec(first_value(max_csv(psi_root, f"rf_psi_{n}"), rf_psi_wall(psi_root, f"rf_psi_{n}")))
+            for n in SIZES
+        ],
+        "PSI (two-way)": [sec(max_csv(psi_root, f"direct_psi2_{n}")) for n in SIZES],
         "RF PSI (two-way)": [sec(rf_psi2_wall(psi_root, n)) for n in SIZES],
     }
 

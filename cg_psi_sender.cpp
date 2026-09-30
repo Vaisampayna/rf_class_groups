@@ -69,7 +69,7 @@ int main(int argc, char** argv)
     auto t_protocol = Clock::now();
     auto t_poly = Clock::now();
     size_t m_A = set_A.size();
-    size_t n_pts = m_A + m_B + 1;
+    size_t n_pts = psi_opa_point_count(m_A + m_B + 1, q);
     std::cerr << "[psi_sender] direct OLE PSI |S_A|=" << m_A
               << ", |S_B|=" << m_B << ", n_pts=" << n_pts << "\n";
 
@@ -89,7 +89,7 @@ int main(int argc, char** argv)
     // q_A(alpha_i) as the OLE b-vector and r_A(alpha_i) as the a-vector; the
     // receiver contributes p_B and obtains p_cap = q_A + r_A*p_B.
     auto t_exchange = Clock::now();
-    opa_send_with_q(n_pts, qA, rA, q, receiver_ip, "psi_sender", port);
+    opa_send_with_q(n_pts, qA, rA, q, receiver_ip, "psi_sender", port, &cg);
     std::cerr << "[psi_sender] direct OPA send-share exchange done in "
               << ms_since(t_exchange) << " ms\n";
     const double protocol_ms = ms_since(t_protocol);

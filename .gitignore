@@ -1,0 +1,17 @@
+build/
+build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+logs/
+inputs/
+benchmark_2pc_*/
+run_2pc_*_20*/
+
+*.log
+*.tmp
+__pycache__/
+*.pyc
+

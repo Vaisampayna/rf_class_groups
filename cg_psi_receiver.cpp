@@ -82,7 +82,7 @@ int main(int argc, char** argv)
     auto t_protocol = Clock::now();
     auto t_poly = Clock::now();
     size_t m_B = set_B.size();
-    size_t n_pts = m_A + m_B + 1;
+    size_t n_pts = psi_opa_point_count(m_A + m_B + 1, q);
     std::cerr << "[psi_receiver] direct OLE PSI |S_A|=" << m_A
               << ", |S_B|=" << m_B << ", n_pts=" << n_pts << "\n";
 
@@ -95,7 +95,7 @@ int main(int argc, char** argv)
     // interpolate unless the auto policy selects it; for these sizes
     // barycentric evaluation on S_B is typically faster.
     auto t_exchange = Clock::now();
-    OpaResult opa = opa_receive_with_q(n_pts, pB, q, "psi_receiver", port);
+    OpaResult opa = opa_receive_with_q(n_pts, pB, q, "psi_receiver", port, &cg);
     std::cerr << "[psi_receiver] direct OPA output-share receive done in "
               << ms_since(t_exchange) << " ms\n";
 

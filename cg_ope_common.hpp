@@ -168,9 +168,7 @@ inline std::vector<BICYCL::Mpz> direct_ole_batch_receive(
     BICYCL::RandGen rng = make_secure_randgen();
     std::unique_ptr<CG_AHE::CG_Scheme> owned_cg;
     if (!existing_cg) {
-        BICYCL::RandGen public_rng = make_public_param_randgen();
-        owned_cg.reset(new CG_AHE::CG_Scheme(CG_Q_NBITS, CG_K, CG_SECLEVEL,
-                                             public_rng, rng));
+        owned_cg.reset(new CG_AHE::CG_Scheme(make_cg_scheme(rng)));
     }
     CG_AHE::CG_Scheme& cg = existing_cg ? *existing_cg : *owned_cg;
     CG_AHE::SecretKey sk = cg.keygen_sk();
@@ -250,9 +248,7 @@ inline void direct_ole_batch_send(
     BICYCL::RandGen rng = make_secure_randgen();
     std::unique_ptr<CG_AHE::CG_Scheme> owned_cg;
     if (!existing_cg) {
-        BICYCL::RandGen public_rng = make_public_param_randgen();
-        owned_cg.reset(new CG_AHE::CG_Scheme(CG_Q_NBITS, CG_K, CG_SECLEVEL,
-                                             public_rng, rng));
+        owned_cg.reset(new CG_AHE::CG_Scheme(make_cg_scheme(rng)));
     }
     CG_AHE::CG_Scheme& cg = existing_cg ? *existing_cg : *owned_cg;
     const auto& cs = cg.cs();

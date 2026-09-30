@@ -69,7 +69,7 @@ int main(int argc, char** argv) {
     // and the membership test, but excludes writing the output/check files.
     auto t_poly = Clock::now();
     size_t m_B = set_B.size();
-    size_t n_pts = m_A + m_B + 1;
+    size_t n_pts = psi_opa_point_count(m_A + m_B + 1, q);
     std::cerr << "[psi_receiver] |S_A|=" << m_A << ", |S_B|=" << m_B
               << ", n_pts=" << n_pts << "\n";
 

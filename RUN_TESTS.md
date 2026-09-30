@@ -3,6 +3,7 @@
 Run these commands from the `reverse_firewall_cg` directory after building:
 
 ```bash
+sudo apt-get install -y build-essential cmake libgmp-dev libssl-dev libntl-dev
 cmake -S . -B build
 cmake --build build -j
 ```
@@ -46,7 +47,8 @@ checker against `true_intersection.txt`.
 ## Two-Machine Scripts
 
 For the reported two-machine experiments, use the `run_2pc_*.sh` entrypoints
-and sweep scripts described in `RUN_2PC_SETUP.md`.
+and sweep scripts described in `RUN_2PC_SETUP.md`. The full paper-table driver
+is `benchmark_2pc_paper_all.sh`.
 
 ## Logs
 

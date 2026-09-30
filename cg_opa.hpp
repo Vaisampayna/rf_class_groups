@@ -3,7 +3,7 @@
  * Direct OPA over batched OLE.
  *
  * OPA is implemented by evaluating sender and receiver polynomials at public
- * points alpha_i=i+1, then using batched OLE to obtain b(alpha)+a(alpha)*x.
+ * points, then using batched OLE to obtain b(alpha)+a(alpha)*x.
  */
 
 #include "cg_ope_common.hpp"
@@ -30,14 +30,15 @@ inline OpaResult opa_receive_with_q(
     const std::vector<BICYCL::Mpz>& receiver_poly_coeffs,
     const BICYCL::Mpz& q,
     const std::string& role,
-    const char* port_rec = nullptr)
+    const char* port_rec = nullptr,
+    CG_AHE::CG_Scheme* existing_cg = nullptr)
 {
-    // OPA is reduced to batched OLE at public points alpha_i=i+1.  The
+    // OPA is reduced to batched OLE at shared public points.  The
     // receiver evaluates its private polynomial locally and uses those values
     // as OLE receiver inputs.
     require_public_eval_points_distinct(n_pts, q);
     auto t_eval = Clock::now();
-    std::vector<BICYCL::Mpz> alpha = rf_opa_eval_points(n_pts);
+    std::vector<BICYCL::Mpz> alpha = rf_opa_eval_points(n_pts, q);
     std::vector<BICYCL::Mpz> x_vals =
         poly_eval_batch_auto(receiver_poly_coeffs, alpha, q);
     std::cerr << "[" << role << "] direct OPA setup/evaluation done in "
@@ -46,7 +47,7 @@ inline OpaResult opa_receive_with_q(
     auto t_exchange = Clock::now();
     const char* port = port_rec ? port_rec : ope_port_rec();
     std::vector<BICYCL::Mpz> y_vals =
-        direct_ole_batch_receive(x_vals, port, role);
+        direct_ole_batch_receive(x_vals, port, role, existing_cg);
     std::cerr << "[" << role << "] direct OPA/OLE output-share receive done in "
               << ms_since(t_exchange) << " ms\n";
     return {std::move(alpha), std::move(x_vals), std::move(y_vals), q};
@@ -61,7 +62,7 @@ inline OpaResult opa_receive(
     BICYCL::RandGen rng = make_secure_randgen();
     CG_AHE::CG_Scheme cg = make_cg_scheme(rng);
     return opa_receive_with_q(n_pts, receiver_poly_coeffs,
-                              cg.cs().cleartext_bound(), role, port_rec);
+                              cg.cs().cleartext_bound(), role, port_rec, &cg);
 }
 
 inline OpaSendEvals opa_send_with_q(
@@ -71,13 +72,14 @@ inline OpaSendEvals opa_send_with_q(
     const BICYCL::Mpz& q,
     const char* receiver_host,
     const std::string& role,
-    const char* port_rec = nullptr)
+    const char* port_rec = nullptr,
+    CG_AHE::CG_Scheme* existing_cg = nullptr)
 {
     // Sender evaluates both OLE coefficient polynomials at the same public
     // points.  The batched OLE output is b(alpha_i)+a(alpha_i)*x(alpha_i).
     require_public_eval_points_distinct(n_pts, q);
     auto t_eval = Clock::now();
-    std::vector<BICYCL::Mpz> alpha = rf_opa_eval_points(n_pts);
+    std::vector<BICYCL::Mpz> alpha = rf_opa_eval_points(n_pts, q);
     std::vector<BICYCL::Mpz> b_vals =
         poly_eval_batch_auto(b_poly_coeffs, alpha, q);
     std::vector<BICYCL::Mpz> a_vals =
@@ -87,7 +89,7 @@ inline OpaSendEvals opa_send_with_q(
 
     auto t_exchange = Clock::now();
     const char* port = port_rec ? port_rec : ope_port_rec();
-    direct_ole_batch_send(a_vals, b_vals, receiver_host, port, role);
+    direct_ole_batch_send(a_vals, b_vals, receiver_host, port, role, existing_cg);
     std::cerr << "[" << role << "] direct OPA/OLE send-share exchange done in "
               << ms_since(t_exchange) << " ms\n";
     return {std::move(alpha), std::move(b_vals), std::move(a_vals), q};
@@ -105,5 +107,5 @@ inline OpaSendEvals opa_send(
     CG_AHE::CG_Scheme cg = make_cg_scheme(rng);
     return opa_send_with_q(n_pts, b_poly_coeffs, a_poly_coeffs,
                            cg.cs().cleartext_bound(), receiver_host, role,
-                           port_rec);
+                           port_rec, &cg);
 }

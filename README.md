@@ -1,4 +1,4 @@
-# Class-Group Reverse-Firewall OLE / OPE / OPA / 1 WAY PSI / 2 WAY PSI
+# Class-Group Reverse-Firewall OLE / OPE / OPA / PSI
 
 This folder is a standalone C++17 demo/benchmark package for reverse-firewalled
 protocols over Class-Group additively homomorphic encryption:
@@ -14,8 +14,8 @@ implementation and scripts for these rows; generated benchmark outputs,
 alternate experiments.
 
 The CG-AHE wrapper and BICYCL headers used by the demos are included under
-`third_party/cg_ahe`, making the artifact self-contained for building and
-reproducing the experiments.
+`third_party/cg_ahe`, making the artifact self-contained apart from system
+libraries.
 
 ## Dependencies
 
@@ -23,7 +23,7 @@ Ubuntu/Debian packages:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y build-essential cmake libgmp-dev libssl-dev
+sudo apt-get install -y build-essential cmake libgmp-dev libssl-dev libntl-dev
 ```
 
 ## Build
@@ -35,6 +35,20 @@ cmake --build build -j
 
 The CMake build creates the reported OLE/OPE/OPA/PSI binaries and the local
 correctness helpers used by the scripts.
+
+For paper-style timing runs on each protocol host, use a release/native build:
+
+```bash
+cmake -S . -B build-2pc \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCG_ENABLE_NATIVE_ARCH=ON \
+  -DCG_ENABLE_LTO=ON \
+  -DCG_USE_NTL_POLY=ON
+cmake --build build-2pc -j
+```
+
+The configure output should say that NTL was found. Without NTL the code still
+builds, but PSI timings will not match the paper configuration.
 
 ## Quick Runs
 
@@ -83,12 +97,14 @@ export REMOTE_USER=<party-a-user>
 export LOCAL_ROOT=<party-b-repo-path>
 export REMOTE_ROOT=<party-a-repo-path>
 export BUILD_DIR=build-2pc
-export CHECKER_DIR="$PWD/build-portable"
+export CHECKER_DIR="$PWD/build"
 ```
 
 ```bash
 bash run_2pc_direct_ole.sh 1000
 bash run_2pc_rf_ole.sh 1000
+bash run_2pc_direct_ole3.sh 1000
+bash run_2pc_rf_ole3.sh 1000
 bash run_2pc_direct_ope.sh 1000
 bash run_2pc_rf_ope.sh 1000
 bash run_2pc_direct_opa.sh 1000
@@ -106,9 +122,13 @@ LOCAL_IP=<party-b-ip> REMOTE_IP=<party-a-ip> CG_RF_LANES=8 bash run_2pc_rf_psi.s
 ```
 
 Sweep scripts are provided for the table-style experiments, including
-`benchmark_2pc_cg_sweep.sh`, `benchmark_2pc_ole3_sweep.sh`,
-`benchmark_2pc_psi_fast_sweep.sh`, `run_2pc_direct_psi2_sweep.sh`, and
-`run_2pc_rf_psi2_sweep.sh`.
+`benchmark_2pc_paper_all.sh`, `run_2pc_direct_psi2_sweep.sh`, and
+`run_2pc_rf_psi2_sweep.sh`. The recommended paper reproduction entrypoint is:
+
+```bash
+bash benchmark_2pc_paper_all.sh
+python3 make_reported_total_table.py benchmark_2pc_paper_all_...
+```
 
 All `run_2pc_*.sh` entrypoints use file-backed benchmark inputs. OLE, OPE,
 OPA, one-way PSI, and two-way PSI also run external correctness checks after the
@@ -133,15 +153,13 @@ that RF-OPA layer.
 
 ## Polynomial Layer
 
-OPA batch-evaluates the sender and receiver polynomials with a product-tree
-multipoint evaluator over the CG-AHE plaintext modulus `q`. PSI set-polynomial
-construction also uses a balanced product tree for `prod(X - item)`. The
-implemented PSI protocol samples sender masks `r_A` and `r'_A`, forms
-`q_A = p_A * r'_A`, and invokes one OPA instance so the receiver obtains
-`p_cap = q_A + r_A * p_B`. For each receiver element `beta`, `p_B(beta)=0`, so
-`p_cap(beta)=p_A(beta)r'_A(beta)` and the receiver tests for zero. The modulus
-is still the random CG plaintext prime, so this is not an NTT-specific modulus
-change.
+OPA batch-evaluates the sender and receiver polynomials over the CG-AHE
+plaintext field `Z_q`. For reproducible paper benchmarks, the scripts set
+`CG_FIXED_Q=170141183460469232709364739622490341377`, an NTT-friendly 128-bit
+prime, and `CG_USE_NTT_POLY=1`. PSI/PSI2 then pads the OPA evaluation domain to
+the next power of two with `psi_opa_point_count(...)`, so the NTT path is used
+for the large polynomial interpolation/evaluation layer. NTL is also used for
+large finite-field polynomial operations when `libntl` is available.
 
 ## Main Files
 

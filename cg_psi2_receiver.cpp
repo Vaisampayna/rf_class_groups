@@ -77,7 +77,7 @@ int main(int argc, char** argv)
     auto t_protocol = Clock::now();
     auto t_poly = Clock::now();
     size_t m_B = set_B.size();
-    size_t n_pts = m_A + m_B + 1;
+    size_t n_pts = psi_opa_point_count(m_A + m_B + 1, q);
     std::cerr << "[psi2_receiver] direct two-way PSI |S_A|=" << m_A
               << ", |S_B|=" << m_B << ", n_pts=" << n_pts << "\n";
 
@@ -86,7 +86,7 @@ int main(int argc, char** argv)
               << ms_since(t_poly) << " ms\n";
 
     auto t_exchange = Clock::now();
-    OpaResult opa = opa_receive_with_q(n_pts, pB, q, "psi2_receiver", port);
+    OpaResult opa = opa_receive_with_q(n_pts, pB, q, "psi2_receiver", port, &cg);
     std::cerr << "[psi2_receiver] direct OPA output-share receive done in "
               << ms_since(t_exchange) << " ms\n";
 

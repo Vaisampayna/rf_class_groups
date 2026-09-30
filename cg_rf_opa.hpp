@@ -41,7 +41,7 @@ inline RFOpaResult rf_opa_receive_with_q(
     // underlying batched OLE call is routed through the two reverse firewalls.
     require_public_eval_points_distinct(n_pts, q);
     auto t_eval = Clock::now();
-    std::vector<BICYCL::Mpz> alpha = rf_opa_eval_points(n_pts);
+    std::vector<BICYCL::Mpz> alpha = rf_opa_eval_points(n_pts, q);
     std::vector<BICYCL::Mpz> x_vals =
         poly_eval_batch_auto(pB_coeffs, alpha, q);
     const double eval_ms = ms_since(t_eval);
@@ -80,7 +80,7 @@ inline RFOpaSendEvals rf_opa_send_with_q(
     // those OLE sender vectors through batched RF-OLE.
     require_public_eval_points_distinct(n_pts, q);
     auto t_eval = Clock::now();
-    std::vector<BICYCL::Mpz> alpha = rf_opa_eval_points(n_pts);
+    std::vector<BICYCL::Mpz> alpha = rf_opa_eval_points(n_pts, q);
     std::vector<BICYCL::Mpz> b_vals =
         poly_eval_batch_auto(pA_coeffs, alpha, q);
     std::vector<BICYCL::Mpz> a_vals =

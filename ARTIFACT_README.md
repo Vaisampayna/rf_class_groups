@@ -1,10 +1,9 @@
-# Anonymous Artifact
+# Artifact Readme
 
-This artifact contains the implementation used for the reported CG-AHE
-reverse-firewall experiments.  The benchmark configuration used for the paper
-is:
+This repository contains the C++17 implementation used for the CG-AHE
+reverse-firewall experiments in the paper.
 
-Reported rows:
+Reported protocol families:
 
 - Batched OLE and batched RF-OLE
 - 3-round OLE and 3-round RF-OLE
@@ -13,26 +12,42 @@ Reported rows:
 - Direct one-way PSI and RF one-way PSI
 - Direct two-way PSI and RF two-way PSI
 
+Paper benchmark configuration:
+
 - `CG_Q_NBITS=128`
 - `CG_K=1`
+- `CG_FIXED_Q=170141183460469232709364739622490341377`
+- `CG_USE_NTT_POLY=1`
 - `CG_BENCH_INPUT_BITS=128`
-- PSI elements sampled over the 128-bit plaintext field `Z_q`
-- reported protocol time is `max(local party time, remote party time)`
-- input generation/loading and offline correctness checker dumps are excluded
+- `CG_PSI_INPUT_BITS=128`
+- `CG_RF_LANES=8`
+- `CG_RF_CHUNK_SIZE=128`
+- `CG_RF_THREADS_LOCAL=28`
+- `CG_RF_THREADS_REMOTE=32`
+- reported protocol time is `max(local party time, remote party time)` from
+  `protocol_times.csv`
+- input generation, file loading, and offline correctness checks are excluded
+  from the reported protocol timer
 
-For two-machine runs, replace the placeholders below with the two hostnames or
-IP addresses available in the review environment:
+Build with NTL enabled on both protocol machines. The CMake configure output
+should contain:
 
-```bash
-LOCAL_IP=<party_b_ip>
-REMOTE_IP=<party_a_ip>
-LOCAL_USER=<party_b_user>
-REMOTE_USER=<party_a_user>
-LOCAL_ROOT=<party_b_repo_path>
-REMOTE_ROOT=<party_a_repo_path>
-BUILD_DIR=build-2pc
+```text
+Using NTL for large PSI polynomial operations: /usr/lib/.../libntl.so
 ```
 
-The helper `make_reported_total_table.py` reconstructs the table values from
-raw benchmark logs when those logs are available.  The raw logs are not included
-in this anonymous artifact because they contain machine-specific paths.
+The full paper sweep entrypoint is:
+
+```bash
+bash benchmark_2pc_paper_all.sh
+```
+
+Set `LOCAL_IP`, `REMOTE_IP`, `LOCAL_USER`, `REMOTE_USER`, `LOCAL_ROOT`,
+`REMOTE_ROOT`, `BUILD_DIR`, and `CHECKER_DIR` before running it. See
+`RUN_2PC_SETUP.md` for the complete setup and reproduction commands.
+
+After a sweep finishes, reconstruct the paper-style table with:
+
+```bash
+python3 make_reported_total_table.py <benchmark_2pc_paper_all_...>
+```

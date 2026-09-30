@@ -51,7 +51,7 @@ int main(int argc, char** argv) {
 
     auto t_poly = Clock::now();
     size_t m_A = set_A.size();
-    size_t n_pts = m_A + m_B + 1;
+    size_t n_pts = psi_opa_point_count(m_A + m_B + 1, q);
     std::cerr << "[psi_sender] |S_A|=" << m_A << ", |S_B|=" << m_B
               << ", n_pts=" << n_pts << "\n";
 

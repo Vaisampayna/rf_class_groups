@@ -33,13 +33,14 @@ CG_RF_CHUNK_SIZE="${CG_RF_CHUNK_SIZE:-128}"
 CG_CONNECT_RETRIES="${CG_CONNECT_RETRIES:-7200}"
 CG_Q_NBITS="${CG_Q_NBITS:-128}"
 CG_K="${CG_K:-1}"
+CG_FIXED_Q="${CG_FIXED_Q:-170141183460469232709364739622490341377}"
 CG_BENCH_INPUT_BITS="${CG_BENCH_INPUT_BITS:-128}"
 CG_PSI_INPUT_BITS="${CG_PSI_INPUT_BITS:-128}"
 TIMEOUT_S="${TIMEOUT_S:-3600}"
 
 common_env() {
-    printf 'CG_RF_LANES=%q CG_RF_CHUNK_SIZE=%q CG_CONNECT_RETRIES=%q CG_Q_NBITS=%q CG_K=%q CG_BENCH_INPUT_BITS=%q CG_PSI_INPUT_BITS=%q ' \
-        "$CG_RF_LANES" "$CG_RF_CHUNK_SIZE" "$CG_CONNECT_RETRIES" "$CG_Q_NBITS" "$CG_K" "$CG_BENCH_INPUT_BITS" "$CG_PSI_INPUT_BITS"
+    printf 'CG_RF_LANES=%q CG_RF_CHUNK_SIZE=%q CG_CONNECT_RETRIES=%q CG_Q_NBITS=%q CG_K=%q CG_FIXED_Q=%q CG_BENCH_INPUT_BITS=%q CG_PSI_INPUT_BITS=%q ' \
+        "$CG_RF_LANES" "$CG_RF_CHUNK_SIZE" "$CG_CONNECT_RETRIES" "$CG_Q_NBITS" "$CG_K" "$CG_FIXED_Q" "$CG_BENCH_INPUT_BITS" "$CG_PSI_INPUT_BITS"
 }
 
 ssh_local() {
@@ -51,7 +52,7 @@ ssh_remote() {
 }
 
 cleanup_ports() {
-    local ports=(9001 9002 9003 9004 9010 9041 9042 9043 9103 9104)
+    local ports=(9001 9002 9003 9004 9010 9041 9042 9043 9103 9104 9143)
     ssh_local "fuser -k ${ports[*]/%//tcp} >/dev/null 2>&1 || true" >/dev/null 2>&1 || true
     ssh_remote "fuser -k ${ports[*]/%//tcp} >/dev/null 2>&1 || true" >/dev/null 2>&1 || true
     sleep 1
