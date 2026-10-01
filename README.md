@@ -9,9 +9,8 @@ protocols over Class-Group additively homomorphic encryption:
 
 The reported experiments cover exactly these rows: batched OLE, batched RF-OLE,
 3-round OLE, 3-round RF-OLE, OPE, RF-OPE, OPA, RF-OPA, one-way PSI, one-way
-RF-PSI, direct two-way PSI, and RF two-way PSI.  The repository contains the
-implementation and scripts for these rows; generated benchmark outputs,
-alternate experiments.
+RF-PSI, direct two-way PSI, and RF two-way PSI. The repository contains the
+implementation and scripts for these rows.
 
 The CG-AHE wrapper and BICYCL headers used by the demos are included under
 `third_party/cg_ahe`, making the artifact self-contained apart from system
@@ -115,6 +114,14 @@ bash run_2pc_rf_psi.sh 1000
 bash run_2pc_rf_psi2.sh 1000
 ```
 
+The argument to these scripts is the paper-table benchmark size `N`. For OLE,
+OPE, and PSI this is direct: it is the number of OLE slots, polynomial degree
+scale, or set size. For OPA, `N` is the number of public OPA evaluation points,
+not both polynomial degrees. The OPA scripts split `N` internally so that
+`m_A + m_B + 1 = N`; for example, `bash run_2pc_rf_opa.sh 8192` uses
+`m_A=4096`, `m_B=4095`, and therefore runs `8192` RF-OLE slots. This is the
+convention used by the paper table and keeps OPA comparable with OPE.
+
 Common overrides:
 
 ```bash
@@ -160,6 +167,21 @@ prime, and `CG_USE_NTT_POLY=1`. PSI/PSI2 then pads the OPA evaluation domain to
 the next power of two with `psi_opa_point_count(...)`, so the NTT path is used
 for the large polynomial interpolation/evaluation layer. NTL is also used for
 large finite-field polynomial operations when `libntl` is available.
+
+## Benchmark Size Convention
+
+The paper table columns are labeled by `N = 2^10, ..., 2^15`. The scripts use
+that same convention:
+
+- Batched OLE / RF-OLE: `N` OLE instances.
+- 3-round OLE / 3-round RF-OLE: `N` OLE instances.
+- OPE / RF-OPE: degree-scale `N`, implemented with about `N` OLE slots.
+- OPA / RF-OPA: `N` public evaluation points. The scripts choose polynomial
+  degrees `m_A` and `m_B` satisfying `m_A + m_B + 1 = N`.
+- One-way PSI / RF-PSI: both sets have size `N`.
+- Two-way PSI / RF-PSI: both sets have size `N`; the two-way variant is
+  one-way PSI plus a reveal-back phase.
+
 
 ## Main Files
 
