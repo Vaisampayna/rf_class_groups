@@ -31,8 +31,7 @@ int main(int argc, char** argv)
     close(lfd);
 
     auto t_protocol = Clock::now();
-    uint64_t n = CGNet::recv_u64(sender_fds[0]);
-    CGNet::send_u64(rfr_fds[0], n);
+    size_t n = required_env_size("CG_RF_EXPECTED_N");
     std::cerr << "[rf_sender_ole3] n_oles=" << n << "\n";
 
     CG_AHE::PublicKey pk = CGNet::recv_pk(sender_fds[0], cs);
@@ -45,19 +44,19 @@ int main(int argc, char** argv)
     // before AlignEnc/Rerand.  The b coefficient is only key-aligned here; the
     // b' sanitization happens as a plaintext shift in Round 3.
     std::vector<BICYCL::Mpz> a_blinds =
-        sample_plain_blinds_ole3((size_t)n, cs.cleartext_bound());
+        sample_plain_blinds_ole3(n, cs.cleartext_bound());
     std::vector<BICYCL::Mpz> b_blinds =
-        sample_plain_blinds_ole3((size_t)n, cs.cleartext_bound());
+        sample_plain_blinds_ole3(n, cs.cleartext_bound());
     transform_ct_fwd_with_additive_blind_batch(
-        sender_fds, rfr_fds, (size_t)n, rho, pk, pk_prime, cs, a_blinds,
+        sender_fds, rfr_fds, n, rho, pk, pk_prime, cs, a_blinds,
         "rf_sender_ole3", "round 1 Enc(a)");
-    transform_ct_fwd_batch(sender_fds, rfr_fds, (size_t)n, rho, pk_prime, cs,
+    transform_ct_fwd_batch(sender_fds, rfr_fds, n, rho, pk_prime, cs,
                            "rf_sender_ole3", "round 1 Enc(b)");
     transform_ct_inv_batch(rfr_fds, sender_fds, (size_t)n, rho, pk, cs,
                            "rf_sender_ole3", "round 2 masked Enc(y)");
 
     auto t_z = Clock::now();
-    std::vector<BICYCL::Mpz> z_vals = recv_mpz_lanes0(sender_fds);
+    std::vector<BICYCL::Mpz> z_vals = recv_mpz_lanes0(sender_fds, n);
     z_vals = add_plain_blind_mod_ole3(z_vals, b_blinds, cs.cleartext_bound());
     send_mpz_lanes0(rfr_fds, z_vals);
     std::cerr << "[rf_sender_ole3] round 3 plaintext z forward done in "

@@ -41,9 +41,6 @@ int main(int argc, char** argv)
     std::vector<int> fds = accept_rf_lanes(lfd, LANES);
     close(lfd);
 
-    uint64_t n_rx = CGNet::recv_u64(fds[0]);
-    if (n_rx != n_oles)
-        throw std::runtime_error("RF-OLE3 receiver count mismatch");
     CG_AHE::PublicKey pk = CGNet::recv_pk(fds[0], cs);
 
     std::vector<CG_AHE::CipherText> enc_a(n_oles), enc_b(n_oles), enc_y(n_oles);
@@ -51,8 +48,11 @@ int main(int argc, char** argv)
     recv_ct_lanes(fds, enc_b, n_oles);
 
     auto& pool = global_pool();
+    const bool profile_ops = cg_profile_ops_enabled();
     std::vector<BICYCL::Mpz> r_vals(n_oles), out_vals(n_oles);
-    std::vector<double> enc_r_ms(n_oles), cmult_ms(n_oles), add_ms(n_oles);
+    std::vector<double> enc_r_ms(profile_ops ? n_oles : 0);
+    std::vector<double> cmult_ms(profile_ops ? n_oles : 0);
+    std::vector<double> add_ms(profile_ops ? n_oles : 0);
 
     auto t_r2 = Clock::now();
     pool.parallel_for(0, n_oles, [&](size_t i) {
@@ -60,28 +60,40 @@ int main(int argc, char** argv)
         CG_AHE::CG_Scheme& local_cg = worker_cg();
         r_vals[i] = local_rng.random_mpz(q);
         CG_AHE::ClearText r_ct(local_cg.cs(), r_vals[i]);
-        auto op = Clock::now();
-        CG_AHE::CipherText enc_r = local_cg.encrypt(pk, r_ct);
-        enc_r_ms[i] = ms_since(op);
-        op = Clock::now();
-        CG_AHE::CipherText ax = local_cg.cmult(enc_a[i], x_vals[i]);
-        cmult_ms[i] = ms_since(op);
-        op = Clock::now();
-        CG_AHE::CipherText u = local_cg.add(pk, ax, enc_b[i]);
-        enc_y[i] = local_cg.add(pk, u, enc_r);
-        add_ms[i] = ms_since(op);
+        if (profile_ops) {
+            auto op = Clock::now();
+            CG_AHE::CipherText enc_r = local_cg.encrypt(pk, r_ct);
+            enc_r_ms[i] = ms_since(op);
+            op = Clock::now();
+            CG_AHE::CipherText ax = local_cg.cmult(enc_a[i], x_vals[i]);
+            cmult_ms[i] = ms_since(op);
+            op = Clock::now();
+            CG_AHE::CipherText u = local_cg.add(pk, ax, enc_b[i]);
+            enc_y[i] = local_cg.add(pk, u, enc_r);
+            add_ms[i] = ms_since(op);
+        } else {
+            CG_AHE::CipherText enc_r = local_cg.encrypt(pk, r_ct);
+            CG_AHE::CipherText ax = local_cg.cmult(enc_a[i], x_vals[i]);
+            CG_AHE::CipherText u = local_cg.add(pk, ax, enc_b[i]);
+            enc_y[i] = local_cg.add(pk, u, enc_r);
+        }
     });
     send_ct_lanes(fds, enc_y, n_oles);
     std::cerr << "[rf_ole3_receiver] round 2 mask/sample/compute/send y done in "
               << ms_since(t_r2) << " ms\n";
-    std::cerr << "[rf_ole3_receiver] [OPTIME] encrypt_r sum=" << sum_ms(enc_r_ms)
-              << " ms, avg=" << (n_oles ? sum_ms(enc_r_ms) / (double)n_oles : 0.0) << " ms/op\n";
-    std::cerr << "[rf_ole3_receiver] [OPTIME] cmult_ax sum=" << sum_ms(cmult_ms)
-              << " ms, avg=" << (n_oles ? sum_ms(cmult_ms) / (double)n_oles : 0.0) << " ms/op\n";
-    std::cerr << "[rf_ole3_receiver] [OPTIME] add_mask sum=" << sum_ms(add_ms)
-              << " ms, avg=" << (n_oles ? sum_ms(add_ms) / (double)n_oles : 0.0) << " ms/op\n";
+    if (profile_ops) {
+        const double enc_r_sum = sum_ms(enc_r_ms);
+        const double cmult_sum = sum_ms(cmult_ms);
+        const double add_sum = sum_ms(add_ms);
+        std::cerr << "[rf_ole3_receiver] [OPTIME] encrypt_r sum=" << enc_r_sum
+                  << " ms, avg=" << (n_oles ? enc_r_sum / (double)n_oles : 0.0) << " ms/op\n";
+        std::cerr << "[rf_ole3_receiver] [OPTIME] cmult_ax sum=" << cmult_sum
+                  << " ms, avg=" << (n_oles ? cmult_sum / (double)n_oles : 0.0) << " ms/op\n";
+        std::cerr << "[rf_ole3_receiver] [OPTIME] add_mask sum=" << add_sum
+                  << " ms, avg=" << (n_oles ? add_sum / (double)n_oles : 0.0) << " ms/op\n";
+    }
 
-    std::vector<BICYCL::Mpz> z_vals = recv_mpz_lanes0(fds);
+    std::vector<BICYCL::Mpz> z_vals = recv_mpz_lanes0(fds, n_oles);
     if (z_vals.size() != n_oles)
         throw std::runtime_error("RF-OLE3 receiver z count mismatch");
     for (size_t i = 0; i < n_oles; ++i) {

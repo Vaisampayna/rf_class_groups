@@ -61,44 +61,56 @@ int main(int argc, char* argv[]) {
     std::cerr << "[batch_ole_sender] connected to receiver at "
               << receiver_ip << ":" << port << "\n";
 
-    CGNet::send_u64(fds[0], (uint64_t)n_oles);
     CG_AHE::PublicKey pk = CGNet::recv_pk(fds[0], cs);
 
     auto& pool = global_pool();
     size_t NT = pool.num_threads();
+    const bool profile_ops = cg_profile_ops_enabled();
 
     std::cerr << "[batch_ole_sender] [ENCRYPT B] Encrypting "
               << n_oles << " B-values across " << NT << " threads...\n";
     auto t_pre = Clock::now();
     std::vector<CG_AHE::CipherText> enc_b(n_oles);
-    std::vector<double> enc_b_ms(n_oles, 0.0);
+    std::vector<double> enc_b_ms(profile_ops ? n_oles : 0);
     pool.parallel_for(0, n_oles, [&](size_t i) {
         CG_AHE::CG_Scheme& local_cg = worker_cg();
         CG_AHE::ClearText b_ct(local_cg.cs(), b_vals[i]);
-        auto op_t = Clock::now();
-        enc_b[i] = local_cg.encrypt(pk, b_ct);
-        enc_b_ms[i] = ms_since(op_t);
+        if (profile_ops) {
+            auto op_t = Clock::now();
+            enc_b[i] = local_cg.encrypt(pk, b_ct);
+            enc_b_ms[i] = ms_since(op_t);
+        } else {
+            enc_b[i] = local_cg.encrypt(pk, b_ct);
+        }
     });
     double pre_ms = ms_since(t_pre);
     std::cerr << "[batch_ole_sender] encrypting B ciphertexts done in " << pre_ms << " ms\n";
-    std::cerr << "[batch_ole_sender] [OPTIME] encrypt_b sum=" << sum_ms(enc_b_ms)
-              << " ms, avg=" << (n_oles ? sum_ms(enc_b_ms) / (double)n_oles : 0.0)
-              << " ms/op\n";
+    if (profile_ops) {
+        const double enc_b_sum = sum_ms(enc_b_ms);
+        std::cerr << "[batch_ole_sender] [OPTIME] encrypt_b sum=" << enc_b_sum
+                  << " ms, avg=" << (n_oles ? enc_b_sum / (double)n_oles : 0.0)
+                  << " ms/op\n";
+    }
 
     std::cerr << "[batch_ole_sender] [RECEIVE/COMPUTE/SEND] Starting stream...\n";
     auto t_online = Clock::now();
     std::vector<CG_AHE::CipherText> enc_x(n_oles), enc_y(n_oles);
     recv_ct_lanes(fds, enc_x, n_oles);
 
-    std::vector<double> cmult_ms(n_oles, 0.0), add_ms(n_oles, 0.0);
+    std::vector<double> cmult_ms(profile_ops ? n_oles : 0), add_ms(profile_ops ? n_oles : 0);
     pool.parallel_for(0, n_oles, [&](size_t i) {
         CG_AHE::CG_Scheme& local_cg = worker_cg();
-        auto op_t = Clock::now();
-        CG_AHE::CipherText ax = local_cg.cmult(enc_x[i], a_vals[i]);
-        cmult_ms[i] = ms_since(op_t);
-        op_t = Clock::now();
-        enc_y[i] = local_cg.add(pk, ax, enc_b[i]);
-        add_ms[i] = ms_since(op_t);
+        if (profile_ops) {
+            auto op_t = Clock::now();
+            CG_AHE::CipherText ax = local_cg.cmult(enc_x[i], a_vals[i]);
+            cmult_ms[i] = ms_since(op_t);
+            op_t = Clock::now();
+            enc_y[i] = local_cg.add(pk, ax, enc_b[i]);
+            add_ms[i] = ms_since(op_t);
+        } else {
+            CG_AHE::CipherText ax = local_cg.cmult(enc_x[i], a_vals[i]);
+            enc_y[i] = local_cg.add(pk, ax, enc_b[i]);
+        }
     });
 
     send_ct_lanes(fds, enc_y, n_oles);
@@ -106,12 +118,16 @@ int main(int argc, char* argv[]) {
     std::cerr << "[batch_ole_sender] " << n_oles << "/" << n_oles
               << " OLEs done\n";
     std::cerr << "[batch_ole_sender] receiving ciphertexts, computing responses, and sending ciphertexts done in " << online_ms << " ms\n";
-    std::cerr << "[batch_ole_sender] [OPTIME] cmult sum=" << sum_ms(cmult_ms)
-              << " ms, avg=" << (n_oles ? sum_ms(cmult_ms) / (double)n_oles : 0.0)
-              << " ms/op\n";
-    std::cerr << "[batch_ole_sender] [OPTIME] add sum=" << sum_ms(add_ms)
-              << " ms, avg=" << (n_oles ? sum_ms(add_ms) / (double)n_oles : 0.0)
-              << " ms/op\n";
+    if (profile_ops) {
+        const double cmult_sum = sum_ms(cmult_ms);
+        const double add_sum = sum_ms(add_ms);
+        std::cerr << "[batch_ole_sender] [OPTIME] cmult sum=" << cmult_sum
+                  << " ms, avg=" << (n_oles ? cmult_sum / (double)n_oles : 0.0)
+                  << " ms/op\n";
+        std::cerr << "[batch_ole_sender] [OPTIME] add sum=" << add_sum
+                  << " ms, avg=" << (n_oles ? add_sum / (double)n_oles : 0.0)
+                  << " ms/op\n";
+    }
 
     const double protocol_ms = ms_since(t_protocol);
     write_protocol_timing_file_from_env("batch_ole_sender", protocol_ms);

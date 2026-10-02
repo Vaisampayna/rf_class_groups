@@ -30,11 +30,13 @@ int main() {
     size_t N_THREADS = std::thread::hardware_concurrency();
     size_t LANES = rf_transport_lanes();
     size_t CHUNK = rf_chunk_size();
+    bool profile_ops = cg_profile_ops_enabled();
     auto& pool = global_pool();
     N_THREADS = pool.num_threads();
     std::cerr << "[rf_receiver_opa] init CG-AHE + thread pool (" << N_THREADS
               << " workers), transport lanes=" << LANES
-              << ", chunk=" << CHUNK << "...\n";
+              << ", chunk=" << CHUNK
+              << ", op profiling=" << (profile_ops ? "on" : "off") << "...\n";
 
     BICYCL::RandGen rng = make_secure_randgen();
     CG_AHE::CG_Scheme cg = make_cg_scheme(rng);
@@ -52,8 +54,7 @@ int main() {
     std::vector<int> rfs_fds = accept_rf_lanes(lfd, LANES);
     close(lfd);
 
-    uint64_t n_pts = CGNet::recv_u64(rfs_fds[0]);
-    CGNet::send_u64(rec_fds[0], n_pts);
+    size_t n_pts = required_env_size("CG_RF_EXPECTED_N");
     std::cerr << "[rf_receiver_opa] n_pts=" << n_pts << "\n";
 
     CG_AHE::PublicKey pk = CGNet::recv_pk(rec_fds[0], cs);
@@ -69,37 +70,44 @@ int main() {
 
     std::vector<EncZero> pre1(n_pts), pre2(n_pts);
     const BICYCL::Mpz& rnd_bound = cs.secretkey_bound();
-    std::vector<double> pre_h_ms(2 * n_pts, 0.0), pre_pkexp_ms(2 * n_pts, 0.0);
+    std::vector<double> pre_h_ms(profile_ops ? 2 * n_pts : 0, 0.0);
+    std::vector<double> pre_pkexp_ms(profile_ops ? 2 * n_pts : 0, 0.0);
 
     std::cerr << "[rf_receiver_opa] [CIPHERTEXT FORWARDING] Starting pipeline stream...\n";
     auto t_online = std::chrono::high_resolution_clock::now();
 
     std::vector<CG_AHE::CipherText> in_buf(n_pts), out_buf(n_pts);
-    std::vector<double> r1_nupow(n_pts), r1_c1(n_pts), r1_c2m(n_pts), r1_c2r(n_pts);
-    std::vector<double> r2_nupow(n_pts), r2_c1(n_pts), r2_c2m(n_pts), r2_c2r(n_pts);
+    std::vector<double> r1_nupow(profile_ops ? n_pts : 0), r1_c1(profile_ops ? n_pts : 0);
+    std::vector<double> r1_c2m(profile_ops ? n_pts : 0), r1_c2r(profile_ops ? n_pts : 0);
+    std::vector<double> r2_nupow(profile_ops ? n_pts : 0), r2_c1(profile_ops ? n_pts : 0);
+    std::vector<double> r2_c2m(profile_ops ? n_pts : 0), r2_c2r(profile_ops ? n_pts : 0);
 
     // Round 1: Receiver → R-RF → S-RF (maul forward + rerand)
-    for (size_t begin = 0; begin < (size_t)n_pts; begin += CHUNK) {
-        size_t end = std::min((size_t)n_pts, begin + CHUNK);
+    for (size_t begin = 0; begin < n_pts; begin += CHUNK) {
+        size_t end = std::min(n_pts, begin + CHUNK);
         pool.parallel_for(begin, end, [&](size_t i) {
             thread_local BICYCL::RandGen local_rng = make_secure_randgen();
             CG_AHE::CG_Scheme& local_cg = worker_cg();
             BICYCL::Mpz ri = local_rng.random_mpz(rnd_bound);
-            auto op_t = Clock::now();
+            auto op_t = profile_ops ? Clock::now() : Clock::time_point{};
             local_cg.cs().power_of_h(pre1[i].R, ri);
-            pre_h_ms[i] = ms_since(op_t);
-            op_t = Clock::now();
+            if (profile_ops) pre_h_ms[i] = ms_since(op_t);
+            op_t = profile_ops ? Clock::now() : Clock::time_point{};
             pk_prime.exponentiation(local_cg.cs(), pre1[i].E, ri);
-            pre_pkexp_ms[i] = ms_since(op_t);
+            if (profile_ops) pre_pkexp_ms[i] = ms_since(op_t);
         });
         recv_ct_lanes_range(rec_fds, in_buf, n_pts, begin, end);
         pool.parallel_for(begin, end, [&](size_t i) {
-            MaulRerandProfile p;
-            out_buf[i] = maul_fwd_rerand_profiled(in_buf[i], r_maul, pre1[i], cs, p);
-            r1_nupow[i] = p.nupow_ms;
-            r1_c1[i] = p.c1_rerand_ms;
-            r1_c2m[i] = p.c2_maul_ms;
-            r1_c2r[i] = p.c2_rerand_ms;
+            if (profile_ops) {
+                MaulRerandProfile p;
+                out_buf[i] = maul_fwd_rerand_profiled(in_buf[i], r_maul, pre1[i], cs, p);
+                r1_nupow[i] = p.nupow_ms;
+                r1_c1[i] = p.c1_rerand_ms;
+                r1_c2m[i] = p.c2_maul_ms;
+                r1_c2r[i] = p.c2_rerand_ms;
+            } else {
+                out_buf[i] = maul_fwd_rerand(in_buf[i], r_maul, pre1[i], cs);
+            }
         });
         send_ct_lanes_range(rfs_fds, out_buf, n_pts, begin, end);
     }
@@ -107,27 +115,31 @@ int main() {
               << " over " << LANES << " lane(s)\n";
 
     // Round 2: S-RF → R-RF → Receiver (inverse-maul + rerand)
-    for (size_t begin = 0; begin < (size_t)n_pts; begin += CHUNK) {
-        size_t end = std::min((size_t)n_pts, begin + CHUNK);
+    for (size_t begin = 0; begin < n_pts; begin += CHUNK) {
+        size_t end = std::min(n_pts, begin + CHUNK);
         pool.parallel_for(begin, end, [&](size_t i) {
             thread_local BICYCL::RandGen local_rng = make_secure_randgen();
             CG_AHE::CG_Scheme& local_cg = worker_cg();
             BICYCL::Mpz ri = local_rng.random_mpz(rnd_bound);
-            auto op_t = Clock::now();
+            auto op_t = profile_ops ? Clock::now() : Clock::time_point{};
             local_cg.cs().power_of_h(pre2[i].R, ri);
-            pre_h_ms[n_pts + i] = ms_since(op_t);
-            op_t = Clock::now();
+            if (profile_ops) pre_h_ms[n_pts + i] = ms_since(op_t);
+            op_t = profile_ops ? Clock::now() : Clock::time_point{};
             pk.exponentiation(local_cg.cs(), pre2[i].E, ri);
-            pre_pkexp_ms[n_pts + i] = ms_since(op_t);
+            if (profile_ops) pre_pkexp_ms[n_pts + i] = ms_since(op_t);
         });
         recv_ct_lanes_range(rfs_fds, in_buf, n_pts, begin, end);
         pool.parallel_for(begin, end, [&](size_t i) {
-            MaulRerandProfile p;
-            out_buf[i] = maul_inv_rerand_profiled(in_buf[i], r_maul, pre2[i], cs, p);
-            r2_nupow[i] = p.nupow_ms;
-            r2_c1[i] = p.c1_rerand_ms;
-            r2_c2m[i] = p.c2_maul_ms;
-            r2_c2r[i] = p.c2_rerand_ms;
+            if (profile_ops) {
+                MaulRerandProfile p;
+                out_buf[i] = maul_inv_rerand_profiled(in_buf[i], r_maul, pre2[i], cs, p);
+                r2_nupow[i] = p.nupow_ms;
+                r2_c1[i] = p.c1_rerand_ms;
+                r2_c2m[i] = p.c2_maul_ms;
+                r2_c2r[i] = p.c2_rerand_ms;
+            } else {
+                out_buf[i] = maul_inv_rerand(in_buf[i], r_maul, pre2[i], cs);
+            }
         });
         send_ct_lanes_range(rec_fds, out_buf, n_pts, begin, end);
     }
@@ -140,20 +152,22 @@ int main() {
         std::chrono::high_resolution_clock::now() - t_pre).count();
     std::cerr << "[rf_receiver_opa] randomizer generation and ciphertext forwarding done in " << pre_ms << " ms\n";
     std::cerr << "[rf_receiver_opa] ciphertext forwarding stream done in " << online_ms << " ms\n";
-    std::cerr << "[rf_receiver_opa] [OPTIME] precomp power_of_h sum=" << vec_sum(pre_h_ms)
-              << " ms, avg=" << (2 * n_pts ? vec_sum(pre_h_ms) / (double)(2 * n_pts) : 0.0)
-              << " ms/op\n";
-    std::cerr << "[rf_receiver_opa] [OPTIME] precomp pk.exp sum=" << vec_sum(pre_pkexp_ms)
-              << " ms, avg=" << (2 * n_pts ? vec_sum(pre_pkexp_ms) / (double)(2 * n_pts) : 0.0)
-              << " ms/op\n";
-    std::cerr << "[rf_receiver_opa] [OPTIME] R1 maul_nupow sum=" << vec_sum(r1_nupow)
-              << " ms, c1_rerand=" << vec_sum(r1_c1)
-              << " ms, c2_maul=" << vec_sum(r1_c2m)
-              << " ms, c2_rerand=" << vec_sum(r1_c2r) << " ms\n";
-    std::cerr << "[rf_receiver_opa] [OPTIME] R2 unmaul_nupow sum=" << vec_sum(r2_nupow)
-              << " ms, c1_rerand=" << vec_sum(r2_c1)
-              << " ms, c2_unmaul=" << vec_sum(r2_c2m)
-              << " ms, c2_rerand=" << vec_sum(r2_c2r) << " ms\n";
+    if (profile_ops) {
+        std::cerr << "[rf_receiver_opa] [OPTIME] precomp power_of_h sum=" << vec_sum(pre_h_ms)
+                  << " ms, avg=" << (2 * n_pts ? vec_sum(pre_h_ms) / (double)(2 * n_pts) : 0.0)
+                  << " ms/op\n";
+        std::cerr << "[rf_receiver_opa] [OPTIME] precomp pk.exp sum=" << vec_sum(pre_pkexp_ms)
+                  << " ms, avg=" << (2 * n_pts ? vec_sum(pre_pkexp_ms) / (double)(2 * n_pts) : 0.0)
+                  << " ms/op\n";
+        std::cerr << "[rf_receiver_opa] [OPTIME] R1 maul_nupow sum=" << vec_sum(r1_nupow)
+                  << " ms, c1_rerand=" << vec_sum(r1_c1)
+                  << " ms, c2_maul=" << vec_sum(r1_c2m)
+                  << " ms, c2_rerand=" << vec_sum(r1_c2r) << " ms\n";
+        std::cerr << "[rf_receiver_opa] [OPTIME] R2 unmaul_nupow sum=" << vec_sum(r2_nupow)
+                  << " ms, c1_rerand=" << vec_sum(r2_c1)
+                  << " ms, c2_unmaul=" << vec_sum(r2_c2m)
+                  << " ms, c2_rerand=" << vec_sum(r2_c2r) << " ms\n";
+    }
 
     close_rf_lanes(rfs_fds);
     close_rf_lanes(rec_fds);

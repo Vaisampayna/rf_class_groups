@@ -40,49 +40,68 @@ int main(int argc, char** argv)
               << ms_since(t_protocol) << " ms\n";
 
     std::vector<int> fds = connect_rf_lanes(receiver_ip, port, LANES);
-    CGNet::send_u64(fds[0], (uint64_t)n_oles);
     CGNet::send_pk(fds[0], pk);
 
     auto& pool = global_pool();
+    const bool profile_ops = cg_profile_ops_enabled();
     std::vector<CG_AHE::CipherText> enc_a(n_oles), enc_b(n_oles), enc_y(n_oles);
-    std::vector<double> enc_a_ms(n_oles), enc_b_ms(n_oles), dec_ms(n_oles);
+    std::vector<double> enc_a_ms(profile_ops ? n_oles : 0);
+    std::vector<double> enc_b_ms(profile_ops ? n_oles : 0);
+    std::vector<double> dec_ms(profile_ops ? n_oles : 0);
 
     auto t_r1 = Clock::now();
     pool.parallel_for(0, n_oles, [&](size_t i) {
         CG_AHE::CG_Scheme& local_cg = worker_cg();
         CG_AHE::ClearText a_ct(local_cg.cs(), a_vals[i]);
-        auto op = Clock::now();
-        enc_a[i] = local_cg.encrypt(pk, a_ct);
-        enc_a_ms[i] = ms_since(op);
         CG_AHE::ClearText b_ct(local_cg.cs(), b_vals[i]);
-        op = Clock::now();
-        enc_b[i] = local_cg.encrypt(pk, b_ct);
-        enc_b_ms[i] = ms_since(op);
+        if (profile_ops) {
+            auto op = Clock::now();
+            enc_a[i] = local_cg.encrypt(pk, a_ct);
+            enc_a_ms[i] = ms_since(op);
+            op = Clock::now();
+            enc_b[i] = local_cg.encrypt(pk, b_ct);
+            enc_b_ms[i] = ms_since(op);
+        } else {
+            enc_a[i] = local_cg.encrypt(pk, a_ct);
+            enc_b[i] = local_cg.encrypt(pk, b_ct);
+        }
     });
     send_ct_lanes(fds, enc_a, n_oles);
     send_ct_lanes(fds, enc_b, n_oles);
     std::cerr << "[ole3_sender] round 1 key/encrypted a,b sent in "
               << ms_since(t_r1) << " ms\n";
-    std::cerr << "[ole3_sender] [OPTIME] encrypt_a sum=" << sum_ms(enc_a_ms)
-              << " ms, avg=" << (n_oles ? sum_ms(enc_a_ms) / (double)n_oles : 0.0) << " ms/op\n";
-    std::cerr << "[ole3_sender] [OPTIME] encrypt_b sum=" << sum_ms(enc_b_ms)
-              << " ms, avg=" << (n_oles ? sum_ms(enc_b_ms) / (double)n_oles : 0.0) << " ms/op\n";
+    if (profile_ops) {
+        const double enc_a_sum = sum_ms(enc_a_ms);
+        const double enc_b_sum = sum_ms(enc_b_ms);
+        std::cerr << "[ole3_sender] [OPTIME] encrypt_a sum=" << enc_a_sum
+                  << " ms, avg=" << (n_oles ? enc_a_sum / (double)n_oles : 0.0) << " ms/op\n";
+        std::cerr << "[ole3_sender] [OPTIME] encrypt_b sum=" << enc_b_sum
+                  << " ms, avg=" << (n_oles ? enc_b_sum / (double)n_oles : 0.0) << " ms/op\n";
+    }
 
     auto t_r3 = Clock::now();
     recv_ct_lanes(fds, enc_y, n_oles);
     std::vector<BICYCL::Mpz> z_vals(n_oles);
     pool.parallel_for(0, n_oles, [&](size_t i) {
         CG_AHE::CG_Scheme& local_cg = worker_cg();
-        auto op = Clock::now();
-        CG_AHE::ClearText z_ct = local_cg.decrypt(sk, enc_y[i]);
-        dec_ms[i] = ms_since(op);
-        z_vals[i] = static_cast<const BICYCL::Mpz&>(z_ct);
+        if (profile_ops) {
+            auto op = Clock::now();
+            CG_AHE::ClearText z_ct = local_cg.decrypt(sk, enc_y[i]);
+            dec_ms[i] = ms_since(op);
+            z_vals[i] = static_cast<const BICYCL::Mpz&>(z_ct);
+        } else {
+            CG_AHE::ClearText z_ct = local_cg.decrypt(sk, enc_y[i]);
+            z_vals[i] = static_cast<const BICYCL::Mpz&>(z_ct);
+        }
     });
     send_mpz_lanes0(fds, z_vals);
     std::cerr << "[ole3_sender] round 3 decrypt masked outputs and send z done in "
               << ms_since(t_r3) << " ms\n";
-    std::cerr << "[ole3_sender] [OPTIME] decrypt_z sum=" << sum_ms(dec_ms)
-              << " ms, avg=" << (n_oles ? sum_ms(dec_ms) / (double)n_oles : 0.0) << " ms/op\n";
+    if (profile_ops) {
+        const double dec_sum = sum_ms(dec_ms);
+        std::cerr << "[ole3_sender] [OPTIME] decrypt_z sum=" << dec_sum
+                  << " ms, avg=" << (n_oles ? dec_sum / (double)n_oles : 0.0) << " ms/op\n";
+    }
 
     const double protocol_ms = ms_since(t_protocol);
     write_protocol_timing_file_from_env("ole3_sender", protocol_ms);

@@ -15,6 +15,7 @@ cd "$BUILD_DIR"
 SYSTEM_B_IP="${1:-127.0.0.1}"
 DEGREE="${2:-1000}"
 shift 2 || true
+export CG_RF_EXPECTED_N="${CG_RF_EXPECTED_N:-$DEGREE}"
 export CG_RF_LANES="${CG_RF_LANES:-4}"
 export CG_CONNECT_RETRIES="${CG_CONNECT_RETRIES:-3600}"
 DEFAULT_THREADS=$(( ($(nproc) + 1) / 2 ))

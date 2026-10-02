@@ -109,7 +109,13 @@ for n in "${SIZES[@]}"; do
         script="$(script_for "$proto")"
         echo "==> ${proto}_${n}"
         set +e
-        OUT_DIR="$run_dir" "$script" "$n"
+        if [[ "$proto" == "rf_psi2" && -z "${CG_PSI2_REVEAL_BOUND+x}" ]]; then
+            reveal_bound="${OVERLAP:-$((n / 5))}"
+            OVERLAP="$reveal_bound" CG_PSI2_REVEAL_BOUND="$reveal_bound" \
+                OUT_DIR="$run_dir" "$script" "$n"
+        else
+            OUT_DIR="$run_dir" "$script" "$n"
+        fi
         rc=$?
         set -e
         merge_run "$run_dir"

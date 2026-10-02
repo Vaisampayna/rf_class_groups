@@ -21,6 +21,7 @@
 #include <vector>
 #include <chrono>
 #include <cstdlib>
+#include <exception>
 #include <thread>
 #include <numeric>
 #include <sys/socket.h>
@@ -109,6 +110,10 @@ inline void close_rf_lanes(std::vector<int>& fds) {
 
 inline double sum_ms(const std::vector<double>& xs) {
     return std::accumulate(xs.begin(), xs.end(), 0.0);
+}
+
+inline double profiled_sum_ms(const std::vector<double>& xs) {
+    return xs.empty() ? 0.0 : sum_ms(xs);
 }
 
 inline thread_local double g_last_rf_ole_online_ms = 0.0;
@@ -258,17 +263,11 @@ inline std::vector<BICYCL::Mpz> rf_ole_batch_receive(
     std::vector<int> fds = accept_rf_lanes(lfd, LANES);
     close(lfd);
 
-    uint64_t n_rx = CGNet::recv_u64(fds[0]);
-    if (n_rx != N) {
-        std::cerr << "[" << role << "] OLE count mismatch: got=" << n_rx
-                  << " expected=" << N << "\n";
-        close_rf_lanes(fds);
-        throw std::runtime_error("RF-OLE receiver count mismatch");
-    }
     CGNet::send_pk(fds[0], pk);
 
     auto& pool = global_pool();
     size_t NT = pool.num_threads();
+    const bool profile_ops = cg_profile_ops_enabled();
 
     // Encrypt and send in chunks so the firewalls can start processing early.
     std::cerr << "[" << role << "] [ENCRYPT AND SEND R1] Encrypting/sending "
@@ -276,7 +275,7 @@ inline std::vector<BICYCL::Mpz> rf_ole_batch_receive(
     auto t_pre = std::chrono::high_resolution_clock::now();
 
     std::vector<CG_AHE::CipherText> pre_enc_x(N);
-    std::vector<double> enc_ms(N, 0.0);
+    std::vector<double> enc_ms(profile_ops ? N : 0);
     std::cerr << "[" << role << "] [RECEIVE AND DECRYPT R2] Starting response stream...\n";
     auto t_online = std::chrono::high_resolution_clock::now();
 
@@ -289,9 +288,13 @@ inline std::vector<BICYCL::Mpz> rf_ole_batch_receive(
             // while decrypting under the receiver's sk.
             CG_AHE::CG_Scheme& local_cg = worker_cg();
             CG_AHE::ClearText x_ct(local_cg.cs(), x_vals[i]);
-            auto op_t = Clock::now();
-            pre_enc_x[i] = local_cg.encrypt(pk, x_ct);
-            enc_ms[i] = ms_since(op_t);
+            if (profile_ops) {
+                auto op_t = Clock::now();
+                pre_enc_x[i] = local_cg.encrypt(pk, x_ct);
+                enc_ms[i] = ms_since(op_t);
+            } else {
+                pre_enc_x[i] = local_cg.encrypt(pk, x_ct);
+            }
         });
         send_ct_lanes_range(fds, pre_enc_x, N, begin, end);
     }
@@ -300,24 +303,32 @@ inline std::vector<BICYCL::Mpz> rf_ole_batch_receive(
     std::cerr << "[" << role << "] R1 " << N << "/" << N
               << " RF-OLE inputs sent over " << LANES << " lane(s)\n";
     std::cerr << "[" << role << "] encrypting and sending R1 ciphertexts done in " << pre_ms << " ms\n";
-    std::cerr << "[" << role << "] [OPTIME] encrypt_x sum=" << sum_ms(enc_ms)
-              << " ms, avg=" << (N ? sum_ms(enc_ms) / (double)N : 0.0)
-              << " ms/op\n";
+    if (profile_ops) {
+        const double enc_sum = profiled_sum_ms(enc_ms);
+        std::cerr << "[" << role << "] [OPTIME] encrypt_x sum=" << enc_sum
+                  << " ms, avg=" << (N ? enc_sum / (double)N : 0.0)
+                  << " ms/op\n";
+    }
 
     // R2 is intentionally phase-separated from R1: both RF firewalls finish
     // the R1 key-mauling path before the sender's response path begins.
     std::vector<BICYCL::Mpz> y_vals(N);
     std::vector<CG_AHE::CipherText> y_cts(N);
-    std::vector<double> dec_ms(N, 0.0);
+    std::vector<double> dec_ms(profile_ops ? N : 0);
     for (size_t begin = 0; begin < N; begin += CHUNK) {
         size_t end = std::min(N, begin + CHUNK);
         recv_ct_lanes_range(fds, y_cts, N, begin, end);
         pool.parallel_for(begin, end, [&](size_t i) {
             CG_AHE::CG_Scheme& local_cg = worker_cg();
-            auto op_t = Clock::now();
-            CG_AHE::ClearText y_ct = local_cg.decrypt(sk, y_cts[i]);
-            dec_ms[i] = ms_since(op_t);
-            y_vals[i] = static_cast<const BICYCL::Mpz&>(y_ct);
+            if (profile_ops) {
+                auto op_t = Clock::now();
+                CG_AHE::ClearText y_ct = local_cg.decrypt(sk, y_cts[i]);
+                dec_ms[i] = ms_since(op_t);
+                y_vals[i] = static_cast<const BICYCL::Mpz&>(y_ct);
+            } else {
+                CG_AHE::ClearText y_ct = local_cg.decrypt(sk, y_cts[i]);
+                y_vals[i] = static_cast<const BICYCL::Mpz&>(y_ct);
+            }
         });
     }
     std::cerr << "[" << role << "] R2 " << N << "/" << N
@@ -327,9 +338,12 @@ inline std::vector<BICYCL::Mpz> rf_ole_batch_receive(
         std::chrono::high_resolution_clock::now() - t_online).count();
     g_last_rf_ole_online_ms = online_ms;
     std::cerr << "[" << role << "] full RF-OLE receive side stream done in " << online_ms << " ms\n";
-    std::cerr << "[" << role << "] [OPTIME] decrypt_y sum=" << sum_ms(dec_ms)
-              << " ms, avg=" << (N ? sum_ms(dec_ms) / (double)N : 0.0)
-              << " ms/op\n";
+    if (profile_ops) {
+        const double dec_sum = profiled_sum_ms(dec_ms);
+        std::cerr << "[" << role << "] [OPTIME] decrypt_y sum=" << dec_sum
+                  << " ms, avg=" << (N ? dec_sum / (double)N : 0.0)
+                  << " ms/op\n";
+    }
 
     close_rf_lanes(fds);
     return y_vals;
@@ -358,11 +372,11 @@ inline void rf_ole_batch_send(
     std::cerr << "[" << role << "] connected to RF_S with " << LANES
               << " lane(s), n_oles=" << N << "\n";
 
-    CGNet::send_u64(fds[0], (uint64_t)N);
     CG_AHE::PublicKey fpk = CGNet::recv_pk(fds[0], cs);
 
     auto& pool = global_pool();
     size_t NT = pool.num_threads();
+    const bool profile_ops = cg_profile_ops_enabled();
 
     // Receive all R1 ciphertext chunks before sending R2.  The reverse
     // firewalls are phase-separated (R1 forwarding loop, then R2 forwarding
@@ -374,29 +388,55 @@ inline void rf_ole_batch_send(
     auto t_pre = std::chrono::high_resolution_clock::now();
 
     std::vector<CG_AHE::CipherText> pre_enc_b(N);
-    std::vector<double> enc_b_ms(N, 0.0);
+    std::vector<double> enc_b_ms(profile_ops ? N : 0);
     std::cerr << "[" << role << "] [CIPHERTEXT RESPONSE STREAM] Starting pipeline stream...\n";
     auto t_online = std::chrono::high_resolution_clock::now();
 
     std::vector<CG_AHE::CipherText> ct_x(N), y_vals(N);
-    std::vector<double> cmult_ms(N, 0.0), add_ms(N, 0.0);
+    std::vector<double> cmult_ms(profile_ops ? N : 0), add_ms(profile_ops ? N : 0);
+
+    std::exception_ptr enc_b_exception = nullptr;
+    std::thread enc_b_worker([&] {
+        try {
+            pool.parallel_for(0, N, [&](size_t i) {
+                CG_AHE::CG_Scheme& local_cg = worker_cg();
+                CG_AHE::ClearText b_ct(local_cg.cs(), b_vals[i]);
+                if (profile_ops) {
+                    auto op_t = Clock::now();
+                    pre_enc_b[i] = local_cg.encrypt(fpk, b_ct);
+                    enc_b_ms[i] = ms_since(op_t);
+                } else {
+                    pre_enc_b[i] = local_cg.encrypt(fpk, b_ct);
+                }
+            });
+        } catch (...) {
+            enc_b_exception = std::current_exception();
+        }
+    });
+
     for (size_t begin = 0; begin < N; begin += CHUNK) {
         size_t end = std::min(N, begin + CHUNK);
         recv_ct_lanes_range(fds, ct_x, N, begin, end);
-        pool.parallel_for(begin, end, [&](size_t i) {
-            CG_AHE::CG_Scheme& local_cg = worker_cg();
-            CG_AHE::ClearText b_ct(local_cg.cs(), b_vals[i]);
+    }
+    enc_b_worker.join();
+    if (enc_b_exception)
+        std::rethrow_exception(enc_b_exception);
+
+    pool.parallel_for(0, N, [&](size_t i) {
+        CG_AHE::CG_Scheme& local_cg = worker_cg();
+        if (profile_ops) {
             auto op_t = Clock::now();
-            pre_enc_b[i] = local_cg.encrypt(fpk, b_ct);
-            enc_b_ms[i] = ms_since(op_t);
-            op_t = Clock::now();
             CG_AHE::CipherText t = local_cg.cmult(ct_x[i], a_vals[i]);
             cmult_ms[i] = ms_since(op_t);
             op_t = Clock::now();
             y_vals[i] = local_cg.add(fpk, t, pre_enc_b[i]);
             add_ms[i] = ms_since(op_t);
-        });
-    }
+        } else {
+            CG_AHE::CipherText t = local_cg.cmult(ct_x[i], a_vals[i]);
+            y_vals[i] = local_cg.add(fpk, t, pre_enc_b[i]);
+        }
+    });
+
     for (size_t begin = 0; begin < N; begin += CHUNK) {
         size_t end = std::min(N, begin + CHUNK);
         send_ct_lanes_range(fds, y_vals, N, begin, end);
@@ -411,15 +451,20 @@ inline void rf_ole_batch_send(
     g_last_rf_ole_online_ms = online_ms;
     std::cerr << "[" << role << "] receiving ciphertexts, encrypting B, computing, and sending responses done in " << pre_ms << " ms\n";
     std::cerr << "[" << role << "] ciphertext response stream done in " << online_ms << " ms\n";
-    std::cerr << "[" << role << "] [OPTIME] encrypt_b sum=" << sum_ms(enc_b_ms)
-              << " ms, avg=" << (N ? sum_ms(enc_b_ms) / (double)N : 0.0)
-              << " ms/op\n";
-    std::cerr << "[" << role << "] [OPTIME] cmult sum=" << sum_ms(cmult_ms)
-              << " ms, avg=" << (N ? sum_ms(cmult_ms) / (double)N : 0.0)
-              << " ms/op\n";
-    std::cerr << "[" << role << "] [OPTIME] add sum=" << sum_ms(add_ms)
-              << " ms, avg=" << (N ? sum_ms(add_ms) / (double)N : 0.0)
-              << " ms/op\n";
+    if (profile_ops) {
+        const double enc_b_sum = profiled_sum_ms(enc_b_ms);
+        const double cmult_sum = profiled_sum_ms(cmult_ms);
+        const double add_sum = profiled_sum_ms(add_ms);
+        std::cerr << "[" << role << "] [OPTIME] encrypt_b sum=" << enc_b_sum
+                  << " ms, avg=" << (N ? enc_b_sum / (double)N : 0.0)
+                  << " ms/op\n";
+        std::cerr << "[" << role << "] [OPTIME] cmult sum=" << cmult_sum
+                  << " ms, avg=" << (N ? cmult_sum / (double)N : 0.0)
+                  << " ms/op\n";
+        std::cerr << "[" << role << "] [OPTIME] add sum=" << add_sum
+                  << " ms, avg=" << (N ? add_sum / (double)N : 0.0)
+                  << " ms/op\n";
+    }
 
     close_rf_lanes(fds);
 }

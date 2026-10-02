@@ -33,13 +33,13 @@ int main(int argc, char** argv) {
     CG_AHE::PublicKey pk_prime = maul_pk(pk, rho, cs);
     CGNet::send_pk(rrf_fds[0], pk_prime);
 
-    uint64_t count = CGNet::recv_u64(rrf_fds[0]);
-    CGNet::send_u64(sender_fds[0], count);
+    const size_t reveal_bound = required_env_size("CG_PSI2_REVEAL_BOUND");
+    const size_t count = reveal_bound;
 
-    std::vector<CG_AHE::CipherText> in_buf((size_t)count), out_buf((size_t)count);
-    for (size_t begin = 0; begin < (size_t)count; begin += CHUNK) {
-        size_t end = std::min((size_t)count, begin + CHUNK);
-        recv_ct_lanes_range(rrf_fds, in_buf, (size_t)count, begin, end);
+    std::vector<CG_AHE::CipherText> in_buf(count), out_buf(count);
+    for (size_t begin = 0; begin < count; begin += CHUNK) {
+        size_t end = std::min(count, begin + CHUNK);
+        recv_ct_lanes_range(rrf_fds, in_buf, count, begin, end);
         pool.parallel_for(begin, end, [&](size_t i) {
             CG_AHE::CG_Scheme& local_cg = worker_cg();
             BICYCL::Mpz ri = thread_secure_randgen().random_mpz(cs.secretkey_bound());
@@ -48,12 +48,13 @@ int main(int argc, char** argv) {
             pk.exponentiation(local_cg.cs(), pre.E, ri);
             out_buf[i] = maul_inv_rerand(in_buf[i], rho, pre, cs);
         });
-        send_ct_lanes_range(sender_fds, out_buf, (size_t)count, begin, end);
+        send_ct_lanes_range(sender_fds, out_buf, count, begin, end);
     }
 
     close_rf_lanes(sender_fds);
     close_rf_lanes(rrf_fds);
     std::cerr << "[psi2_reveal_srf] forwarded " << count
-              << " reveal ciphertext(s)\n";
+              << " reveal ciphertext(s) for " << reveal_bound
+              << " fixed slot(s)\n";
     return 0;
 }

@@ -9,6 +9,8 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <set>
+#include <sstream>
 
 int main(int argc, char** argv)
 {
@@ -96,13 +98,28 @@ int main(int argc, char** argv)
               << " for clear reveal-back intersection\n";
     int fd = CGNet::accept_one(lfd);
     close(lfd);
-    uint64_t count = CGNet::recv_u64(fd);
-    std::vector<BICYCL::Mpz> intersection((size_t)count);
-    for (size_t i = 0; i < intersection.size(); ++i)
-        intersection[i] = CGNet::recv_mpz(fd);
+    const size_t reveal_bound = std::min(m_A, m_B);
+    std::set<std::string> own_values;
+    for (const auto& x : set_A) {
+        std::ostringstream oss;
+        oss << x;
+        own_values.insert(oss.str());
+    }
+    std::set<std::string> seen;
+    std::vector<BICYCL::Mpz> intersection;
+    intersection.reserve(reveal_bound);
+    for (size_t i = 0; i < reveal_bound; ++i) {
+        BICYCL::Mpz value = CGNet::recv_mpz(fd);
+        std::ostringstream oss;
+        oss << value;
+        const std::string key = oss.str();
+        if (own_values.count(key) && seen.insert(key).second)
+            intersection.push_back(value);
+    }
     close(fd);
     std::cerr << "[psi2_sender] clear reveal-back receive done in "
-              << ms_since(t_reveal) << " ms\n";
+              << ms_since(t_reveal) << " ms using " << reveal_bound
+              << " fixed reveal slot(s)\n";
 
     const double protocol_ms = ms_since(t_protocol);
     write_protocol_timing_file_from_env("psi2_A", protocol_ms);

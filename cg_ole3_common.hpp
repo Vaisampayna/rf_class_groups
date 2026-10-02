@@ -24,16 +24,16 @@ inline void send_mpz_lanes0(const std::vector<int>& fds,
                             const std::vector<BICYCL::Mpz>& values)
 {
     // Round-3 plaintext z values are small compared with ciphertext traffic;
-    // send them on lane 0 to keep the lane protocol simple.
-    CGNet::send_u64(fds[0], (uint64_t)values.size());
+    // send them on lane 0 to keep the lane protocol simple.  The vector length
+    // is public command-line metadata, so it is not sent in-band.
     for (const auto& v : values)
         CGNet::send_mpz(fds[0], v);
 }
 
-inline std::vector<BICYCL::Mpz> recv_mpz_lanes0(const std::vector<int>& fds)
+inline std::vector<BICYCL::Mpz> recv_mpz_lanes0(const std::vector<int>& fds,
+                                                size_t n)
 {
-    uint64_t n = CGNet::recv_u64(fds[0]);
-    std::vector<BICYCL::Mpz> values((size_t)n);
+    std::vector<BICYCL::Mpz> values(n);
     for (auto& v : values)
         v = CGNet::recv_mpz(fds[0]);
     return values;

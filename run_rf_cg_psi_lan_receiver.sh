@@ -52,6 +52,23 @@ export CG_CONNECT_RETRIES="${CG_CONNECT_RETRIES:-7200}"
 export CG_RF_THREADS="${CG_RF_THREADS:-${CG_RF_THREADS_LOCAL:-10}}"
 export OMP_NUM_THREADS="$CG_RF_THREADS"
 
+next_power_of_two() {
+    local n="$1"
+    local p=1
+    while (( p < n )); do p=$((p * 2)); done
+    printf '%s\n' "$p"
+}
+
+psi_expected_opa_points() {
+    local ma="$1" mb="$2"
+    local raw=$((ma + mb + 1))
+    if [[ "${CG_USE_NTT_POLY:-1}" != "0" && "$CG_FIXED_Q" == "170141183460469232709364739622490341377" ]]; then
+        next_power_of_two "$raw"
+    else
+        printf '%s\n' "$raw"
+    fi
+}
+
 # --- Logging ---
 LOG_DIR="$ROOT/logs"
 mkdir -p "$LOG_DIR"
@@ -116,6 +133,7 @@ else
         >"$LOG_DIR/psi_receiver.log" 2>&1 &
 fi
 PID_R=$!
+export CG_RF_EXPECTED_N="${CG_RF_EXPECTED_N:-$(psi_expected_opa_points "$MA" "$MB")}"
 
 # Receiver Firewall: connects to localhost:9003, listens on :9002 for System A.
 # Start it immediately after the receiver.  The firewall uses retrying connects,

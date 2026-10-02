@@ -39,6 +39,7 @@ inline RFOpaResult rf_opa_receive_with_q(
 {
     // RF-OPA uses the same public-point reduction as direct OPA, but the
     // underlying batched OLE call is routed through the two reverse firewalls.
+    prewarm_batch_pool();
     require_public_eval_points_distinct(n_pts, q);
     auto t_eval = Clock::now();
     std::vector<BICYCL::Mpz> alpha = rf_opa_eval_points(n_pts, q);
@@ -78,6 +79,7 @@ inline RFOpaSendEvals rf_opa_send_with_q(
 {
     // Sender-side RF-OPA: evaluate b(.) and a(.) at public points, then send
     // those OLE sender vectors through batched RF-OLE.
+    prewarm_batch_pool();
     require_public_eval_points_distinct(n_pts, q);
     auto t_eval = Clock::now();
     std::vector<BICYCL::Mpz> alpha = rf_opa_eval_points(n_pts, q);

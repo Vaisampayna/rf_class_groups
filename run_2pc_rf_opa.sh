@@ -17,8 +17,8 @@ M_A=$((N / 2))
 M_B=$((N - M_A - 1))
 INPUT_BITS="${CG_INPUT_FILE_BITS:-128}"
 init_run_dir "run_2pc_rf_opa_${N}"
-ENV_LOCAL="$(common_env) CG_RF_THREADS=$CG_RF_THREADS_LOCAL"
-ENV_REMOTE="$(common_env) CG_RF_THREADS=$CG_RF_THREADS_REMOTE"
+ENV_LOCAL="$(common_env) CG_RF_THREADS=$CG_RF_THREADS_LOCAL CG_RF_EXPECTED_N=$N"
+ENV_REMOTE="$(common_env) CG_RF_THREADS=$CG_RF_THREADS_REMOTE CG_RF_EXPECTED_N=$N"
 LOCAL_IO="/tmp/cg_rf_opa_${N}"
 REMOTE_IO="/tmp/cg_rf_opa_${N}"
 echo "Preparing random ${INPUT_BITS}-bit RF-OPA input files outside timed protocol..."

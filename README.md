@@ -122,6 +122,38 @@ not both polynomial degrees. The OPA scripts split `N` internally so that
 `m_A=4096`, `m_B=4095`, and therefore runs `8192` RF-OLE slots. This is the
 convention used by the paper table and keeps OPA comparable with OPE.
 
+For two-way PSI (`run_2pc_direct_psi2.sh` and `run_2pc_rf_psi2.sh`), the first
+phase is the corresponding one-way PSI protocol, where Party B learns the
+intersection. The second phase reveals the same intersection back to Party A.
+The reveal-back phase does not send `intersection.size()` as a separate
+protocol message. Instead, it sends a fixed number of reveal slots, and Party A
+keeps only revealed values that occur in its own input set.
+
+For RF two-way PSI, this fixed reveal count is controlled by
+`CG_PSI2_REVEAL_BOUND`. If unset, the wrapper uses the conservative value
+`N`, so the return path sends `N` encrypted reveal slots:
+
+```bash
+CG_PSI2_REVEAL_BOUND=32768 bash run_2pc_rf_psi2.sh 32768
+```
+
+This is the cleanest setting when no public upper bound on the intersection
+size is assumed, but it is slower than the original variable-size reveal-back.
+For the paper benchmark generator, the overlap is public and defaults to
+`N/5`; in that case a paper-like run can set the public reveal bound to the
+known overlap:
+
+```bash
+OVERLAP=$((32768 / 5))
+CG_PSI2_REVEAL_BOUND=$OVERLAP bash run_2pc_rf_psi2.sh 32768
+```
+
+Use `CG_PSI2_REVEAL_BOUND=N` to audit the full-padding overhead, and use the
+public-overlap value to reproduce timings closer to the reported table. The
+paper sweep wrappers, `benchmark_2pc_paper_all.sh` and
+`run_2pc_rf_psi2_sweep.sh`, use this public-overlap reveal bound by default
+unless `CG_PSI2_REVEAL_BOUND` is already set by the caller.
+
 Common overrides:
 
 ```bash
@@ -158,6 +190,17 @@ The default is one lane, which preserves the original single-connection
 behavior. The same batched RF-OLE helper is used by RF-OPA, and RF-PSI builds on
 that RF-OPA layer.
 
+For non-paper "fast run" experiments, use the fast preset helper. It keeps the
+same protocol code path but uses a larger RF chunk size and disables detailed
+firewall operation profiling:
+
+```bash
+bash run_2pc_fast_preset.sh ./run_2pc_rf_opa.sh 8192
+```
+
+The paper reproduction driver does not use this helper by default, so published
+configuration and additional optimized experiments remain separate.
+
 ## Polynomial Layer
 
 OPA batch-evaluates the sender and receiver polynomials over the CG-AHE
@@ -180,7 +223,12 @@ that same convention:
   degrees `m_A` and `m_B` satisfying `m_A + m_B + 1 = N`.
 - One-way PSI / RF-PSI: both sets have size `N`.
 - Two-way PSI / RF-PSI: both sets have size `N`; the two-way variant is
-  one-way PSI plus a reveal-back phase.
+  one-way PSI plus a reveal-back phase. Direct two-way PSI sends fixed
+  plaintext reveal slots from Party B to Party A. RF two-way PSI sends fixed
+  encrypted reveal slots through the two reverse firewalls; the firewalls
+  inverse-maul and rerandomize each ciphertext on the return path. The fixed
+  reveal slot count is `CG_PSI2_REVEAL_BOUND`, defaulting to `N` in
+  `run_2pc_rf_psi2.sh`.
 
 
 ## Main Files
@@ -199,10 +247,11 @@ that same convention:
 - `cg_rf_psi_sender.cpp`, `cg_rf_psi_receiver.cpp`: RF-PSI reduction to RF-OPA.
 - `cg_psi_sender.cpp`, `cg_psi_receiver.cpp`: direct one-way PSI.
 - `cg_psi2_sender.cpp`, `cg_psi2_receiver.cpp`: direct two-way PSI, implemented
-  as direct one-way PSI followed by a clear reveal-back of the intersection.
+  as direct one-way PSI followed by a fixed-slot clear reveal-back. The sender
+  filters received values against its own input set.
 - `cg_rf_psi2_reveal_sender.cpp`, `cg_rf_psi2_reveal_receiver.cpp`,
   `cg_rf_psi2_reveal_srf.cpp`, `cg_rf_psi2_reveal_rrf.cpp`: RF two-way PSI
-  reveal-back phase.
+  fixed-slot encrypted reveal-back phase.
 - `generate_sets.py`, `check_correctness.py`: 128-bit plaintext PSI test-data
   generation and external receiver-output checking.
 - `OPERATION_COMMENTS.md`: role-by-role protocol notes.

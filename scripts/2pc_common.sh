@@ -43,6 +43,25 @@ common_env() {
         "$CG_RF_LANES" "$CG_RF_CHUNK_SIZE" "$CG_CONNECT_RETRIES" "$CG_Q_NBITS" "$CG_K" "$CG_FIXED_Q" "$CG_BENCH_INPUT_BITS" "$CG_PSI_INPUT_BITS"
 }
 
+next_power_of_two() {
+    local n="$1"
+    local p=1
+    while (( p < n )); do
+        p=$((p * 2))
+    done
+    printf '%s\n' "$p"
+}
+
+rf_psi_expected_opa_points() {
+    local set_size="$1"
+    local raw=$((2 * set_size + 1))
+    if [[ "${CG_USE_NTT_POLY:-1}" != "0" && "$CG_FIXED_Q" == "170141183460469232709364739622490341377" ]]; then
+        next_power_of_two "$raw"
+    else
+        printf '%s\n' "$raw"
+    fi
+}
+
 ssh_local() {
     ssh -o BatchMode=yes "$LOCAL" "bash -lc $(printf '%q' "$1")"
 }

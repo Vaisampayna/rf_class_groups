@@ -9,13 +9,19 @@
  * under its original secret key.
  */
 #include "cg_rf_ole_batch.hpp"
+#include <fstream>
 #include <iostream>
+#include <set>
+#include <sstream>
 
 int main(int argc, char** argv) {
     std::string output_file = "psi2_sender_intersection.txt";
+    std::string filter_file;
     for (int i = 1; i + 1 < argc; ++i) {
         if (std::string(argv[i]) == "--output-file")
             output_file = argv[i + 1];
+        else if (std::string(argv[i]) == "--filter-file")
+            filter_file = argv[i + 1];
     }
 
     BICYCL::RandGen rng = make_secure_randgen();
@@ -23,6 +29,19 @@ int main(int argc, char** argv) {
     const auto& cs = cg.cs();
     auto& pool = global_pool();
     prewarm_batch_pool();
+    std::set<std::string> own_values;
+    if (!filter_file.empty()) {
+        std::ifstream in(filter_file);
+        if (!in)
+            throw std::runtime_error(std::string("psi2_reveal_sender: cannot open filter file ") + filter_file);
+        std::string token;
+        while (in >> token) {
+            BICYCL::Mpz x(token.c_str());
+            std::ostringstream oss;
+            oss << x;
+            own_values.insert(oss.str());
+        }
+    }
 
     const size_t LANES = rf_transport_lanes();
     const char* port_rfs = env_or_default("CG_PSI2_REVEAL_RFS", "9041");
@@ -34,19 +53,29 @@ int main(int argc, char** argv) {
     CG_AHE::PublicKey pk = cg.keygen_pk(sk);
     CGNet::send_pk(fds[0], pk);
 
-    uint64_t count = CGNet::recv_u64(fds[0]);
-    std::cerr << "[psi2_reveal_sender] expecting " << count
-              << " encrypted intersection value(s)\n";
+    const size_t reveal_bound = required_env_size("CG_PSI2_REVEAL_BOUND");
+    std::cerr << "[psi2_reveal_sender] expecting " << reveal_bound
+              << " fixed reveal slot(s)\n";
 
-    std::vector<CG_AHE::CipherText> enc_values((size_t)count);
-    recv_ct_lanes(fds, enc_values, (size_t)count);
+    std::vector<CG_AHE::CipherText> enc_values(reveal_bound);
+    recv_ct_lanes(fds, enc_values, reveal_bound);
 
-    std::vector<BICYCL::Mpz> intersection((size_t)count);
-    pool.parallel_for(0, (size_t)count, [&](size_t i) {
+    std::vector<BICYCL::Mpz> values(reveal_bound);
+    pool.parallel_for(0, reveal_bound, [&](size_t i) {
         CG_AHE::CG_Scheme& local_cg = worker_cg();
-        CG_AHE::ClearText m = local_cg.decrypt(sk, enc_values[i]);
-        intersection[i] = static_cast<const BICYCL::Mpz&>(m);
+        CG_AHE::ClearText value = local_cg.decrypt(sk, enc_values[i]);
+        values[i] = static_cast<const BICYCL::Mpz&>(value);
     });
+    std::vector<BICYCL::Mpz> intersection;
+    intersection.reserve(reveal_bound);
+    std::set<std::string> seen;
+    for (size_t i = 0; i < reveal_bound; ++i) {
+        std::ostringstream oss;
+        oss << values[i];
+        const std::string key = oss.str();
+        if ((own_values.empty() || own_values.count(key)) && seen.insert(key).second)
+            intersection.push_back(values[i]);
+    }
 
     const double protocol_ms = ms_since(t_protocol);
     write_protocol_timing_file_from_env("psi2_A", protocol_ms);
@@ -65,6 +94,7 @@ int main(int argc, char** argv) {
     std::cout << "[psi2_A] total intersection size: "
               << intersection.size() << "\n";
     std::cerr << "[psi2_reveal_sender] reveal-back phase done in "
-              << protocol_ms << " ms\n";
+              << protocol_ms << " ms using " << reveal_bound
+              << " fixed reveal slot(s)\n";
     return 0;
 }

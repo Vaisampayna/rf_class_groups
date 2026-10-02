@@ -50,15 +50,19 @@ int main(int argc, char** argv) {
     close(lfd);
 
     CG_AHE::PublicKey pk_double = CGNet::recv_pk(fds[0], cs);
-    CGNet::send_u64(fds[0], (uint64_t)intersection.size());
+    const size_t reveal_bound = required_env_size("CG_PSI2_REVEAL_BOUND");
+    if (intersection.size() > reveal_bound)
+        throw std::runtime_error("psi2_reveal_receiver: intersection larger than CG_PSI2_REVEAL_BOUND");
 
-    std::vector<CG_AHE::CipherText> enc_values(intersection.size());
-    pool.parallel_for(0, intersection.size(), [&](size_t i) {
+    std::vector<CG_AHE::CipherText> enc_values(reveal_bound);
+    const BICYCL::Mpz zero(0UL);
+    pool.parallel_for(0, reveal_bound, [&](size_t i) {
         CG_AHE::CG_Scheme& local_cg = worker_cg();
-        CG_AHE::ClearText m(local_cg.cs(), intersection[i]);
-        enc_values[i] = local_cg.encrypt(pk_double, m);
+        const bool real = i < intersection.size();
+        CG_AHE::ClearText value(local_cg.cs(), real ? intersection[i] : zero);
+        enc_values[i] = local_cg.encrypt(pk_double, value);
     });
-    send_ct_lanes(fds, enc_values, intersection.size());
+    send_ct_lanes(fds, enc_values, reveal_bound);
 
     const double protocol_ms = ms_since(t_protocol);
     write_protocol_timing_file_from_env("psi2_B", protocol_ms);
@@ -76,6 +80,7 @@ int main(int argc, char** argv) {
     std::cout << "[psi2_B] total intersection size: "
               << intersection.size() << "\n";
     std::cerr << "[psi2_reveal_receiver] reveal-back phase done in "
-              << protocol_ms << " ms\n";
+              << protocol_ms << " ms using " << reveal_bound
+              << " fixed reveal slot(s)\n";
     return 0;
 }

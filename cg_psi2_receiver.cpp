@@ -105,12 +105,18 @@ int main(int argc, char** argv)
 
     auto t_reveal = Clock::now();
     int fd = CGNet::connect_tcp_retry(sender_ip, reveal_port);
-    CGNet::send_u64(fd, (uint64_t)intersection.size());
-    for (const BICYCL::Mpz& x : intersection)
-        CGNet::send_mpz(fd, x);
+    const size_t reveal_bound = std::min(m_A, m_B);
+    if (intersection.size() > reveal_bound)
+        throw std::runtime_error("psi2_receiver: intersection larger than public reveal bound");
+    const BICYCL::Mpz dummy_zero(0UL);
+    for (size_t i = 0; i < reveal_bound; ++i) {
+        const bool real = i < intersection.size();
+        CGNet::send_mpz(fd, real ? intersection[i] : dummy_zero);
+    }
     close(fd);
     std::cerr << "[psi2_receiver] clear reveal-back send done in "
-              << ms_since(t_reveal) << " ms\n";
+              << ms_since(t_reveal) << " ms using " << reveal_bound
+              << " fixed reveal slot(s)\n";
 
     const double protocol_ms = ms_since(t_protocol);
     write_protocol_timing_file(timing_file, "psi2_B", protocol_ms);

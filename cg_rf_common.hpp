@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <limits>
+#include <stdexcept>
 #include <string>
 #include <sstream>
 #include <mutex>
@@ -324,6 +325,18 @@ inline bool cg_profile_ops_enabled()
     return env && *env && std::string(env) != "0";
 }
 
+inline size_t required_env_size(const char* name)
+{
+    const char* env = std::getenv(name);
+    if (!env || !*env)
+        throw std::runtime_error(std::string("missing required environment variable ") + name);
+    char* end = nullptr;
+    unsigned long long value = std::strtoull(env, &end, 10);
+    if (end == env || *end != '\0' || value == 0)
+        throw std::runtime_error(std::string("invalid positive integer in environment variable ") + name);
+    return (size_t)value;
+}
+
 inline std::vector<BICYCL::Mpz> benchmark_input_vector(
     size_t count,
     uint64_t domain,
@@ -589,6 +602,18 @@ inline BICYCL::Mpz ntt_primitive_root(size_t n, const BICYCL::Mpz& q)
     if (n == 1)
         return BICYCL::Mpz(1UL);
 
+    std::ostringstream key_ss;
+    key_ss << n << ":" << q;
+    const std::string key = key_ss.str();
+    static std::mutex cache_mu;
+    static std::unordered_map<std::string, BICYCL::Mpz> cache;
+    {
+        std::lock_guard<std::mutex> lock(cache_mu);
+        auto found = cache.find(key);
+        if (found != cache.end())
+            return found->second;
+    }
+
     BICYCL::Mpz exp;
     BICYCL::Mpz::sub(exp, q, BICYCL::Mpz(1UL));
     BICYCL::Mpz::divexact(exp, exp, (unsigned long)n);
@@ -603,6 +628,10 @@ inline BICYCL::Mpz ntt_primitive_root(size_t n, const BICYCL::Mpz& q)
     BICYCL::Mpz::pow_mod(check, root, BICYCL::Mpz((unsigned long)(n / 2)), q);
     if (check == BICYCL::Mpz(1UL))
         throw std::runtime_error("ntt_primitive_root: non-primitive root");
+    {
+        std::lock_guard<std::mutex> lock(cache_mu);
+        cache.emplace(key, root);
+    }
     return root;
 }
 

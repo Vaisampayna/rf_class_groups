@@ -33,6 +33,7 @@ export CG_CONNECT_RETRIES="${CG_CONNECT_RETRIES:-3600}"
 export CG_Q_NBITS="${CG_Q_NBITS:-128}"
 export CG_K="${CG_K:-1}"
 export CG_BENCH_INPUT_BITS="${CG_BENCH_INPUT_BITS:-128}"
+export CG_FIXED_Q="${CG_FIXED_Q:-170141183460469232709364739622490341377}"
 DEFAULT_THREADS=$(( ($(nproc) + 1) / 2 ))
 if (( DEFAULT_THREADS < 1 )); then DEFAULT_THREADS=1; fi
 export CG_RF_THREADS="${CG_RF_THREADS:-$DEFAULT_THREADS}"
@@ -43,6 +44,32 @@ export CG_PSI2_FOPA1_RFS="${CG_PSI2_FOPA1_RFS:-9001}"
 export CG_PSI2_REVEAL_REC="${CG_PSI2_REVEAL_REC:-9043}"
 export CG_PSI2_REVEAL_RFR="${CG_PSI2_REVEAL_RFR:-9042}"
 export CG_PSI2_REVEAL_RFS="${CG_PSI2_REVEAL_RFS:-9041}"
+
+next_power_of_two() {
+    local n="$1"
+    local p=1
+    while (( p < n )); do p=$((p * 2)); done
+    printf '%s\n' "$p"
+}
+
+psi_expected_opa_points() {
+    local ma="$1" mb="$2"
+    local raw=$((ma + mb + 1))
+    if [[ "${CG_USE_NTT_POLY:-1}" != "0" && "$CG_FIXED_Q" == "170141183460469232709364739622490341377" ]]; then
+        next_power_of_two "$raw"
+    else
+        printf '%s\n' "$raw"
+    fi
+}
+
+M_A="$(wc -w <"$SET_A_FILE")"
+export CG_RF_EXPECTED_N="${CG_RF_EXPECTED_N:-$(psi_expected_opa_points "$M_A" "$M_B")}"
+if (( M_A < M_B )); then
+    DEFAULT_REVEAL_BOUND="$M_A"
+else
+    DEFAULT_REVEAL_BOUND="$M_B"
+fi
+export CG_PSI2_REVEAL_BOUND="${CG_PSI2_REVEAL_BOUND:-$DEFAULT_REVEAL_BOUND}"
 
 LOG_DIR="$ROOT/logs"
 mkdir -p "$LOG_DIR"
@@ -121,6 +148,7 @@ echo "Transport lanes: $CG_RF_LANES"
 echo "Crypto worker threads per process: $CG_RF_THREADS"
 echo "One-way RF-PSI ports: $CG_PSI2_FOPA1_RFS/$CG_PSI2_FOPA1_RFR/$CG_PSI2_FOPA1_REC"
 echo "Reveal-back ports: $CG_PSI2_REVEAL_RFS/$CG_PSI2_REVEAL_RFR/$CG_PSI2_REVEAL_REC"
+echo "Reveal-back fixed slots: $CG_PSI2_REVEAL_BOUND"
 
 # Phase 1: A acts as the one-way PSI sender.
 CG_PORT_RFR="$CG_PSI2_FOPA1_RFR" CG_PORT_RFS="$CG_PSI2_FOPA1_RFS" \
@@ -141,7 +169,8 @@ PID_SRF_REVEAL=$!
 wait_for_log "$LOG_DIR/psi2_a_srf_reveal.log" "listening on :$CG_PSI2_REVEAL_RFS" "$PID_SRF_REVEAL" "A S-RF reveal"
 
 CG_PROTOCOL_TIMING_FILE="$LOG_DIR/psi2_A_reveal_time.csv" \
-    ./cg_rf_psi2_reveal_sender --output-file "$LOG_DIR/psi2_A_intersection.txt" >"$LOG_DIR/psi2_A.log" 2>&1 &
+    ./cg_rf_psi2_reveal_sender --filter-file "$SET_A_FILE" \
+        --output-file "$LOG_DIR/psi2_A_intersection.txt" >"$LOG_DIR/psi2_A.log" 2>&1 &
 PID_REVEAL=$!
 wait_or_report "$PID_REVEAL" "Party A reveal endpoint" "$LOG_DIR/psi2_A.log"
 wait_or_report "$PID_SRF_REVEAL" "A S-RF reveal" "$LOG_DIR/psi2_a_srf_reveal.log"

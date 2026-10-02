@@ -135,22 +135,6 @@ inline BICYCL::Mpz finish_ope_receiver(
     return add_mod(y_vals.back(), mul_mod(alpha, s_b, q), q);
 }
 
-inline void send_mpz_vec_ope(int fd, const std::vector<BICYCL::Mpz>& v)
-{
-    CGNet::send_u64(fd, (uint64_t)v.size());
-    for (const auto& x : v)
-        CGNet::send_mpz(fd, x);
-}
-
-inline std::vector<BICYCL::Mpz> recv_mpz_vec_ope(int fd)
-{
-    uint64_t n = CGNet::recv_u64(fd);
-    std::vector<BICYCL::Mpz> v((size_t)n);
-    for (auto& x : v)
-        x = CGNet::recv_mpz(fd);
-    return v;
-}
-
 inline std::vector<BICYCL::Mpz> direct_ole_batch_receive(
     const std::vector<BICYCL::Mpz>& x_vals,
     const char* port,
@@ -180,14 +164,13 @@ inline std::vector<BICYCL::Mpz> direct_ole_batch_receive(
     std::vector<int> fds = accept_rf_lanes(lfd, LANES);
     close(lfd);
 
-    uint64_t n_rx = CGNet::recv_u64(fds[0]);
-    if (n_rx != N)
-        throw std::runtime_error("direct OLE receiver count mismatch");
     CGNet::send_pk(fds[0], pk);
 
     auto& pool = global_pool();
     std::vector<CG_AHE::CipherText> enc_x(N), enc_y(N);
-    std::vector<double> enc_ms(N, 0.0), dec_ms(N, 0.0);
+    const bool profile_ops = cg_profile_ops_enabled();
+    std::vector<double> enc_ms(profile_ops ? N : 0);
+    std::vector<double> dec_ms(profile_ops ? N : 0);
     std::cerr << "[" << role << "] direct chunked encrypt/send, chunk="
               << CHUNK << "\n";
     auto t_exchange = Clock::now();
@@ -197,9 +180,13 @@ inline std::vector<BICYCL::Mpz> direct_ole_batch_receive(
         pool.parallel_for(begin, end, [&](size_t i) {
             CG_AHE::CG_Scheme& local_cg = worker_cg();
             CG_AHE::ClearText x_ct(local_cg.cs(), x_vals[i]);
-            auto op_t = Clock::now();
-            enc_x[i] = local_cg.encrypt(pk, x_ct);
-            enc_ms[i] = ms_since(op_t);
+            if (profile_ops) {
+                auto op_t = Clock::now();
+                enc_x[i] = local_cg.encrypt(pk, x_ct);
+                enc_ms[i] = ms_since(op_t);
+            } else {
+                enc_x[i] = local_cg.encrypt(pk, x_ct);
+            }
         });
         send_ct_lanes_range(fds, enc_x, N, begin, end);
         // The sender consumes one chunk and immediately returns that chunk's
@@ -208,20 +195,29 @@ inline std::vector<BICYCL::Mpz> direct_ole_batch_receive(
         recv_ct_lanes_range(fds, enc_y, N, begin, end);
         pool.parallel_for(begin, end, [&](size_t i) {
             CG_AHE::CG_Scheme& local_cg = worker_cg();
-            auto op_t = Clock::now();
-            CG_AHE::ClearText y_ct = local_cg.decrypt(sk, enc_y[i]);
-            dec_ms[i] = ms_since(op_t);
-            y_vals[i] = static_cast<const BICYCL::Mpz&>(y_ct);
+            if (profile_ops) {
+                auto op_t = Clock::now();
+                CG_AHE::ClearText y_ct = local_cg.decrypt(sk, enc_y[i]);
+                dec_ms[i] = ms_since(op_t);
+                y_vals[i] = static_cast<const BICYCL::Mpz&>(y_ct);
+            } else {
+                CG_AHE::ClearText y_ct = local_cg.decrypt(sk, enc_y[i]);
+                y_vals[i] = static_cast<const BICYCL::Mpz&>(y_ct);
+            }
         });
     }
     std::cerr << "[" << role << "] direct sending ciphertexts, receiving outputs, and decrypting done in "
               << ms_since(t_exchange) << " ms\n";
-    std::cerr << "[" << role << "] [OPTIME] direct encrypt_x sum="
-              << sum_ms(enc_ms) << " ms, avg="
-              << (N ? sum_ms(enc_ms) / (double)N : 0.0) << " ms/op\n";
-    std::cerr << "[" << role << "] [OPTIME] direct decrypt_y sum="
-              << sum_ms(dec_ms) << " ms, avg="
-              << (N ? sum_ms(dec_ms) / (double)N : 0.0) << " ms/op\n";
+    if (profile_ops) {
+        const double enc_sum = sum_ms(enc_ms);
+        const double dec_sum = sum_ms(dec_ms);
+        std::cerr << "[" << role << "] [OPTIME] direct encrypt_x sum="
+                  << enc_sum << " ms, avg="
+                  << (N ? enc_sum / (double)N : 0.0) << " ms/op\n";
+        std::cerr << "[" << role << "] [OPTIME] direct decrypt_y sum="
+                  << dec_sum << " ms, avg="
+                  << (N ? dec_sum / (double)N : 0.0) << " ms/op\n";
+    }
 
     close_rf_lanes(fds);
     return y_vals;
@@ -257,12 +253,14 @@ inline void direct_ole_batch_send(
     std::cerr << "[" << role << "] connected to " << host << ":" << port
               << " with " << LANES << " lane(s)\n";
 
-    CGNet::send_u64(fds[0], (uint64_t)N);
     CG_AHE::PublicKey pk = CGNet::recv_pk(fds[0], cs);
 
     auto& pool = global_pool();
     std::vector<CG_AHE::CipherText> enc_b(N), enc_x(N), enc_y(N);
-    std::vector<double> enc_b_ms(N, 0.0), cmult_ms(N, 0.0), add_ms(N, 0.0);
+    const bool profile_ops = cg_profile_ops_enabled();
+    std::vector<double> enc_b_ms(profile_ops ? N : 0);
+    std::vector<double> cmult_ms(profile_ops ? N : 0);
+    std::vector<double> add_ms(profile_ops ? N : 0);
     std::cerr << "[" << role << "] direct chunked receive/compute/send, chunk="
               << CHUNK << "\n";
     auto t_response_stream = Clock::now();
@@ -272,29 +270,40 @@ inline void direct_ole_batch_send(
         pool.parallel_for(begin, end, [&](size_t i) {
             CG_AHE::CG_Scheme& local_cg = worker_cg();
             CG_AHE::ClearText b_ct(local_cg.cs(), b_vals[i]);
-            auto op_t = Clock::now();
-            enc_b[i] = local_cg.encrypt(pk, b_ct);
-            enc_b_ms[i] = ms_since(op_t);
-            op_t = Clock::now();
-            CG_AHE::CipherText ax = local_cg.cmult(enc_x[i], a_vals[i]);
-            cmult_ms[i] = ms_since(op_t);
-            op_t = Clock::now();
-            enc_y[i] = local_cg.add(pk, ax, enc_b[i]);
-            add_ms[i] = ms_since(op_t);
+            if (profile_ops) {
+                auto op_t = Clock::now();
+                enc_b[i] = local_cg.encrypt(pk, b_ct);
+                enc_b_ms[i] = ms_since(op_t);
+                op_t = Clock::now();
+                CG_AHE::CipherText ax = local_cg.cmult(enc_x[i], a_vals[i]);
+                cmult_ms[i] = ms_since(op_t);
+                op_t = Clock::now();
+                enc_y[i] = local_cg.add(pk, ax, enc_b[i]);
+                add_ms[i] = ms_since(op_t);
+            } else {
+                enc_b[i] = local_cg.encrypt(pk, b_ct);
+                CG_AHE::CipherText ax = local_cg.cmult(enc_x[i], a_vals[i]);
+                enc_y[i] = local_cg.add(pk, ax, enc_b[i]);
+            }
         });
         send_ct_lanes_range(fds, enc_y, N, begin, end);
     }
     std::cerr << "[" << role << "] direct receiving inputs, encrypting B, computing, and sending outputs done in "
               << ms_since(t_response_stream) << " ms\n";
-    std::cerr << "[" << role << "] [OPTIME] direct encrypt_b sum="
-              << sum_ms(enc_b_ms) << " ms, avg="
-              << (N ? sum_ms(enc_b_ms) / (double)N : 0.0) << " ms/op\n";
-    std::cerr << "[" << role << "] [OPTIME] direct cmult sum="
-              << sum_ms(cmult_ms) << " ms, avg="
-              << (N ? sum_ms(cmult_ms) / (double)N : 0.0) << " ms/op\n";
-    std::cerr << "[" << role << "] [OPTIME] direct add sum="
-              << sum_ms(add_ms) << " ms, avg="
-              << (N ? sum_ms(add_ms) / (double)N : 0.0) << " ms/op\n";
+    if (profile_ops) {
+        const double enc_b_sum = sum_ms(enc_b_ms);
+        const double cmult_sum = sum_ms(cmult_ms);
+        const double add_sum = sum_ms(add_ms);
+        std::cerr << "[" << role << "] [OPTIME] direct encrypt_b sum="
+                  << enc_b_sum << " ms, avg="
+                  << (N ? enc_b_sum / (double)N : 0.0) << " ms/op\n";
+        std::cerr << "[" << role << "] [OPTIME] direct cmult sum="
+                  << cmult_sum << " ms, avg="
+                  << (N ? cmult_sum / (double)N : 0.0) << " ms/op\n";
+        std::cerr << "[" << role << "] [OPTIME] direct add sum="
+                  << add_sum << " ms, avg="
+                  << (N ? add_sum / (double)N : 0.0) << " ms/op\n";
+    }
 
     close_rf_lanes(fds);
 }

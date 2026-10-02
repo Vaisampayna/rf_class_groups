@@ -72,7 +72,13 @@ for n in "${SIZES[@]}"; do
     run_dir="$SWEEP_DIR/run_${n}"
     echo "==> rf_psi2_reveal_${n}"
     set +e
-    OUT_DIR="$run_dir" bash ./run_2pc_rf_psi2.sh "$n"
+    if [[ -z "${CG_PSI2_REVEAL_BOUND+x}" ]]; then
+        reveal_bound="${OVERLAP:-$((n / 5))}"
+        OVERLAP="$reveal_bound" CG_PSI2_REVEAL_BOUND="$reveal_bound" \
+            OUT_DIR="$run_dir" bash ./run_2pc_rf_psi2.sh "$n"
+    else
+        OUT_DIR="$run_dir" bash ./run_2pc_rf_psi2.sh "$n"
+    fi
     rc=$?
     set -e
     merge_run "$n" "$run_dir"

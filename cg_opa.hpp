@@ -36,6 +36,7 @@ inline OpaResult opa_receive_with_q(
     // OPA is reduced to batched OLE at shared public points.  The
     // receiver evaluates its private polynomial locally and uses those values
     // as OLE receiver inputs.
+    prewarm_batch_pool();
     require_public_eval_points_distinct(n_pts, q);
     auto t_eval = Clock::now();
     std::vector<BICYCL::Mpz> alpha = rf_opa_eval_points(n_pts, q);
@@ -77,6 +78,7 @@ inline OpaSendEvals opa_send_with_q(
 {
     // Sender evaluates both OLE coefficient polynomials at the same public
     // points.  The batched OLE output is b(alpha_i)+a(alpha_i)*x(alpha_i).
+    prewarm_batch_pool();
     require_public_eval_points_distinct(n_pts, q);
     auto t_eval = Clock::now();
     std::vector<BICYCL::Mpz> alpha = rf_opa_eval_points(n_pts, q);

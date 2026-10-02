@@ -63,33 +63,36 @@ int main(int argc, char* argv[]) {
     std::vector<int> fds = accept_rf_lanes(lfd, LANES);
     close(lfd);
 
-    uint64_t n_rx = CGNet::recv_u64(fds[0]);
-    if (n_rx != n_oles) {
-        close_rf_lanes(fds);
-        throw std::runtime_error("direct batch OLE receiver count mismatch");
-    }
     CGNet::send_pk(fds[0], pk);
 
     auto& pool = global_pool();
     size_t NT = pool.num_threads();
+    const bool profile_ops = cg_profile_ops_enabled();
 
     std::cerr << "[batch_ole_receiver] [ENCRYPT X] Encrypting "
               << n_oles << " inputs across " << NT << " threads...\n";
     auto t_pre = Clock::now();
     std::vector<CG_AHE::CipherText> enc_x(n_oles);
-    std::vector<double> enc_ms(n_oles, 0.0);
+    std::vector<double> enc_ms(profile_ops ? n_oles : 0);
     pool.parallel_for(0, n_oles, [&](size_t i) {
         CG_AHE::CG_Scheme& local_cg = worker_cg();
         CG_AHE::ClearText x_ct(local_cg.cs(), x_vals[i]);
-        auto op_t = Clock::now();
-        enc_x[i] = local_cg.encrypt(pk, x_ct);
-        enc_ms[i] = ms_since(op_t);
+        if (profile_ops) {
+            auto op_t = Clock::now();
+            enc_x[i] = local_cg.encrypt(pk, x_ct);
+            enc_ms[i] = ms_since(op_t);
+        } else {
+            enc_x[i] = local_cg.encrypt(pk, x_ct);
+        }
     });
     double pre_ms = ms_since(t_pre);
     std::cerr << "[batch_ole_receiver] encrypting input ciphertexts done in " << pre_ms << " ms\n";
-    std::cerr << "[batch_ole_receiver] [OPTIME] encrypt_x sum=" << sum_ms(enc_ms)
-              << " ms, avg=" << (n_oles ? sum_ms(enc_ms) / (double)n_oles : 0.0)
-              << " ms/op\n";
+    if (profile_ops) {
+        const double enc_sum = sum_ms(enc_ms);
+        std::cerr << "[batch_ole_receiver] [OPTIME] encrypt_x sum=" << enc_sum
+                  << " ms, avg=" << (n_oles ? enc_sum / (double)n_oles : 0.0)
+                  << " ms/op\n";
+    }
 
     std::cerr << "[batch_ole_receiver] [SEND/RECEIVE/DECRYPT] Starting stream...\n";
     auto t_online = Clock::now();
@@ -101,21 +104,29 @@ int main(int argc, char* argv[]) {
     recv_ct_lanes(fds, enc_y, n_oles);
 
     std::vector<BICYCL::Mpz> y_vals(n_oles);
-    std::vector<double> dec_ms(n_oles, 0.0);
+    std::vector<double> dec_ms(profile_ops ? n_oles : 0);
     pool.parallel_for(0, n_oles, [&](size_t i) {
         CG_AHE::CG_Scheme& local_cg = worker_cg();
-        auto op_t = Clock::now();
-        CG_AHE::ClearText y_ct = local_cg.decrypt(sk, enc_y[i]);
-        dec_ms[i] = ms_since(op_t);
-        y_vals[i] = static_cast<const BICYCL::Mpz&>(y_ct);
+        if (profile_ops) {
+            auto op_t = Clock::now();
+            CG_AHE::ClearText y_ct = local_cg.decrypt(sk, enc_y[i]);
+            dec_ms[i] = ms_since(op_t);
+            y_vals[i] = static_cast<const BICYCL::Mpz&>(y_ct);
+        } else {
+            CG_AHE::ClearText y_ct = local_cg.decrypt(sk, enc_y[i]);
+            y_vals[i] = static_cast<const BICYCL::Mpz&>(y_ct);
+        }
     });
     double online_ms = ms_since(t_online);
     std::cerr << "[batch_ole_receiver] R2 " << n_oles << "/" << n_oles
               << " OLE outputs received\n";
     std::cerr << "[batch_ole_receiver] sending ciphertexts, receiving outputs, and decrypting done in " << online_ms << " ms\n";
-    std::cerr << "[batch_ole_receiver] [OPTIME] decrypt_y sum=" << sum_ms(dec_ms)
-              << " ms, avg=" << (n_oles ? sum_ms(dec_ms) / (double)n_oles : 0.0)
-              << " ms/op\n";
+    if (profile_ops) {
+        const double dec_sum = sum_ms(dec_ms);
+        std::cerr << "[batch_ole_receiver] [OPTIME] decrypt_y sum=" << dec_sum
+                  << " ms, avg=" << (n_oles ? dec_sum / (double)n_oles : 0.0)
+                  << " ms/op\n";
+    }
 
     const double protocol_ms = ms_since(t_protocol);
     write_protocol_timing_file_from_env("batch_ole_receiver", protocol_ms);

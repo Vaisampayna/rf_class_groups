@@ -52,6 +52,23 @@ export CG_CONNECT_RETRIES="${CG_CONNECT_RETRIES:-7200}"
 export CG_RF_THREADS="${CG_RF_THREADS:-${CG_RF_THREADS_REMOTE:-12}}"
 export OMP_NUM_THREADS="$CG_RF_THREADS"
 
+next_power_of_two() {
+    local n="$1"
+    local p=1
+    while (( p < n )); do p=$((p * 2)); done
+    printf '%s\n' "$p"
+}
+
+psi_expected_opa_points() {
+    local ma="$1" mb="$2"
+    local raw=$((ma + mb + 1))
+    if [[ "${CG_USE_NTT_POLY:-1}" != "0" && "$CG_FIXED_Q" == "170141183460469232709364739622490341377" ]]; then
+        next_power_of_two "$raw"
+    else
+        printf '%s\n' "$raw"
+    fi
+}
+
 # --- Arguments ---
 SYSTEM_B_IP="${1:?Usage: $0 <System_B_IP> [--random <m_A> <m_B> [seed]] OR [\"<S_A elements>\" <m_B>]}"
 MODE="${2:-explicit}"
@@ -85,6 +102,25 @@ wait_or_report() {
     fi
 }
 
+if [[ "$MODE" == "--random" ]]; then
+    MA="${3:-1000}"
+    MB="${4:-1000}"
+    SEED="${5:-42}"
+    echo "[sender] Mode: RANDOM  |S_A|=$MA  |S_B|=$MB  seed=$SEED"
+elif [[ "$MODE" == "--file" ]]; then
+    SET_A_FILE="${3:-$ROOT/set_A.txt}"
+    MB="${4:-1000}"
+    MA="$(wc -w <"$SET_A_FILE")"
+    echo "[sender] Mode: FILE  |S_A|=$MA  |S_B|=$MB  set_A=$SET_A_FILE"
+else
+    # Explicit mode: arg2 = space-separated elements of S_A, arg3 = size of S_B
+    SA="${2:-10 20 30 40 50}"
+    MB="${3:-5}"
+    MA=$(echo "$SA" | wc -w)
+    echo "[sender] Mode: EXPLICIT  |S_A|=$MA  |S_B|=$MB"
+fi
+export CG_RF_EXPECTED_N="${CG_RF_EXPECTED_N:-$(psi_expected_opa_points "$MA" "$MB")}"
+
 # Sender Firewall: connects to System B at :9002, listens locally on :9001
 ./cg_rf_sender_firewall_opa "${SYSTEM_B_IP}" >"$LOG_DIR/psi_rf_sender.log" 2>&1 &
 PID_RFS=$!
@@ -92,25 +128,12 @@ echo "[sender] Sender Firewall started (PID=$PID_RFS). Connecting to $SYSTEM_B_I
 sleep 2
 
 if [[ "$MODE" == "--random" ]]; then
-    MA="${3:-1000}"
-    MB="${4:-1000}"
-    SEED="${5:-42}"
-    echo "[sender] Mode: RANDOM  |S_A|=$MA  |S_B|=$MB  seed=$SEED"
     ./cg_rf_psi_sender "$MB" --random "$MA" "$SEED" \
         >"$LOG_DIR/psi_sender.log" 2>&1 &
 elif [[ "$MODE" == "--file" ]]; then
-    SET_A_FILE="${3:-$ROOT/set_A.txt}"
-    MB="${4:-1000}"
-    MA="$(wc -w <"$SET_A_FILE")"
-    echo "[sender] Mode: FILE  |S_A|=$MA  |S_B|=$MB  set_A=$SET_A_FILE"
     ./cg_rf_psi_sender "$MB" --input-file "$SET_A_FILE" \
         >"$LOG_DIR/psi_sender.log" 2>&1 &
 else
-    # Explicit mode: arg2 = space-separated elements of S_A, arg3 = size of S_B
-    SA="${2:-10 20 30 40 50}"
-    MB="${3:-5}"
-    MA=$(echo "$SA" | wc -w)
-    echo "[sender] Mode: EXPLICIT  |S_A|=$MA  |S_B|=$MB"
     # shellcheck disable=SC2086
     ./cg_rf_psi_sender "$MB" $SA \
         >"$LOG_DIR/psi_sender.log" 2>&1 &

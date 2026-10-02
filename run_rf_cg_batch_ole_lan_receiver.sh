@@ -11,6 +11,7 @@ fi
 cd "$BUILD_DIR"
 
 N=${1:-1000}
+export CG_RF_EXPECTED_N="${CG_RF_EXPECTED_N:-$N}"
 export CG_RF_LANES="${CG_RF_LANES:-4}"
 export CG_CONNECT_RETRIES="${CG_CONNECT_RETRIES:-3600}"
 DEFAULT_THREADS=$(( ($(nproc) + 1) / 2 ))
