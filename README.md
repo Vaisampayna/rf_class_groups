@@ -60,7 +60,30 @@ bash run_rf_cg_batch_ole_local.sh 100
 OPA:
 
 ```bash
-bash run_rf_cg_opa_local.sh 2 "1 2 1" "1 1 1" "-1 0 1"
+bash run_rf_cg_opa_local.sh 1 "1 2 3" "-1 1"
+```
+
+The RF-OPA local command has the form:
+
+```bash
+bash run_rf_cg_opa_local.sh <d> "<a coefficients>" "<b coefficients>"
+```
+
+Coefficients are written in constant-term-first order. The sender's masking
+polynomial `r` is sampled freshly inside the sender binary; it is not a command
+line input. In the example above:
+
+```text
+d = 1
+a(X) = 1 + 2X + 3X^2      degree <= 2d
+b(X) = -1 + X             degree <= d
+r(X) is sampled internally degree <= d
+```
+
+The receiver obtains evaluations of:
+
+```text
+a(X) + r(X)b(X)
 ```
 
 PSI, with 128-bit plaintext file inputs and an external correctness check:
@@ -182,7 +205,7 @@ running the local scripts:
 
 ```bash
 CG_RF_LANES=4 bash run_rf_cg_batch_ole_local.sh 1000
-CG_RF_LANES=4 bash run_rf_cg_opa_local.sh 1 "1 2 3" "1 1" "-1 1"
+CG_RF_LANES=4 bash run_rf_cg_opa_local.sh 1 "1 2 3" "-1 1"
 CG_RF_LANES=4 bash run_rf_cg_psi_local.sh 1000 1000 200 42
 ```
 

@@ -23,11 +23,11 @@ LOCAL_IO="/tmp/cg_rf_opa_${N}"
 REMOTE_IO="/tmp/cg_rf_opa_${N}"
 echo "Preparing random ${INPUT_BITS}-bit RF-OPA input files outside timed protocol..."
 ssh_local "rm -rf '$LOCAL_IO'; mkdir -p '$LOCAL_IO'; cd '$LOCAL_ROOT'; python3 generate_protocol_inputs.py list '$((D + 1))' '$LOCAL_IO/pB.txt' --bits '$INPUT_BITS'"
-ssh_remote "rm -rf '$REMOTE_IO'; mkdir -p '$REMOTE_IO'; cd '$REMOTE_ROOT'; python3 generate_protocol_inputs.py list '$((2 * D + 1))' '$REMOTE_IO/pA.txt' --bits '$INPUT_BITS'; python3 generate_protocol_inputs.py list '$((D + 1))' '$REMOTE_IO/rA.txt' --bits '$INPUT_BITS'"
+ssh_remote "rm -rf '$REMOTE_IO'; mkdir -p '$REMOTE_IO'; cd '$REMOTE_ROOT'; python3 generate_protocol_inputs.py list '$((2 * D + 1))' '$REMOTE_IO/pA.txt' --bits '$INPUT_BITS'"
 
 run_pair "rf_opa_${N}" "local_first" \
     "cd '$LOCAL_ROOT/$BUILD_DIR'; export $ENV_LOCAL CG_BENCH_IO_DIR='$LOCAL_IO'; CG_PROTOCOL_TIMING_FILE='$LOCAL_IO/protocol_time.csv' ./cg_rf_opa_receiver '$N_PTS' '$D' --input-file '$LOCAL_IO/pB.txt' & ./cg_rf_receiver_firewall_opa; wait" \
-    "cd '$REMOTE_ROOT/$BUILD_DIR'; export $ENV_REMOTE CG_BENCH_IO_DIR='$REMOTE_IO' CG_PROTOCOL_TIMING_FILE='$REMOTE_IO/protocol_time.csv'; ./cg_rf_sender_firewall_opa '$LOCAL_IP' & sleep 1; ./cg_rf_opa_sender '$N_PTS' '$D' --input-file '$REMOTE_IO/pA.txt' -- --input-file '$REMOTE_IO/rA.txt'; wait"
+    "cd '$REMOTE_ROOT/$BUILD_DIR'; export $ENV_REMOTE CG_BENCH_IO_DIR='$REMOTE_IO' CG_PROTOCOL_TIMING_FILE='$REMOTE_IO/protocol_time.csv'; ./cg_rf_sender_firewall_opa '$LOCAL_IP' & sleep 1; ./cg_rf_opa_sender '$N_PTS' '$D' --input-file '$REMOTE_IO/pA.txt'; wait"
 check_opa "rf_opa_${N}" "$LOCAL_IO" "$REMOTE_IO" \
     rf_opa_sender_coeffs.txt rf_opa_receiver_output.txt
 finish_run

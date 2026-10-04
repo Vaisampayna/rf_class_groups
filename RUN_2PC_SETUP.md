@@ -280,12 +280,12 @@ ssh <party-b-user>@<party-b-ip> \
   'mkdir -p /tmp/cg_inputs && printf -- "-1\n1\n" > /tmp/cg_inputs/pB.txt'
 ```
 
-Sender side, `<party-a-ip>`, needs `pA.txt` with `2d+1` coefficients and
-`rA.txt` with `d+1` coefficients:
+Sender side, `<party-a-ip>`, needs `pA.txt` with `2d+1` coefficients. The
+masking polynomial `rA` is sampled freshly inside the sender binary:
 
 ```bash
 ssh <party-a-user>@<party-a-ip> \
-  'mkdir -p /tmp/cg_inputs && printf "1\n2\n3\n" > /tmp/cg_inputs/pA.txt && printf "1\n1\n" > /tmp/cg_inputs/rA.txt'
+  'mkdir -p /tmp/cg_inputs && printf "1\n2\n3\n" > /tmp/cg_inputs/pA.txt'
 ```
 
 Run receiver side first, then sender side. This example uses `d=1`, so
@@ -306,7 +306,7 @@ ssh <party-a-user>@<party-a-ip> \
    export CG_Q_NBITS=128 CG_K=1 CG_BENCH_INPUT_BITS=128 CG_RF_LANES=8 CG_RF_CHUNK_SIZE=128 CG_CONNECT_RETRIES=7200 CG_RF_THREADS=32 CG_RF_EXPECTED_N=3;
    ./cg_rf_sender_firewall_opa <party-b-ip> > ../logs/opa_rf_sender.log 2>&1 &
    sleep 1;
-   ./cg_rf_opa_sender 3 1 --input-file /tmp/cg_inputs/pA.txt -- --input-file /tmp/cg_inputs/rA.txt > ../logs/opa_sender.log 2>&1;
+   ./cg_rf_opa_sender 3 1 --input-file /tmp/cg_inputs/pA.txt > ../logs/opa_sender.log 2>&1;
    wait'
 ```
 

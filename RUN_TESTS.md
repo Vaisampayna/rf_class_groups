@@ -20,12 +20,13 @@ on localhost, then writes logs under `logs/`.
 ## RF-OPA
 
 ```bash
-CG_RF_LANES=4 bash run_rf_cg_opa_local.sh 2 2 "1 2 1" "1 1 1" "-1 0 1"
+CG_RF_LANES=4 bash run_rf_cg_opa_local.sh 2 "1 2 1 0 0" "-1 0 1"
 ```
 
-Arguments are `m_A`, `m_B`, sender polynomial `p_A`, sender mask polynomial
-`r_A`, and receiver polynomial `p_B`, with coefficients written in
-constant-to-highest-degree order.
+Arguments are `d`, sender polynomial `p_A` of degree at most `2d`, and receiver
+polynomial `p_B` of degree at most `d`, with coefficients written in
+constant-to-highest-degree order. The sender samples the mask polynomial `r_A`
+internally.
 
 ## RF-PSI
 
