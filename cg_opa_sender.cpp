@@ -14,15 +14,16 @@ int main(int argc, char** argv)
 {
     if (argc < 5) {
         std::cerr << "Usage: " << argv[0]
-                  << " <receiver_ip> <m_A> <m_B> <b_poly_0> ... <b_poly_m_A>"
-                  << " -- <a_poly_0> ... <a_poly_m_A> [port]\n";
+                  << " <receiver_ip> <n_pts> <d> <a_poly_0> ... <a_poly_2d>"
+                  << " -- <r_poly_0> ... <r_poly_d> [port]\n";
         return 2;
     }
 
     const char* receiver_ip = argv[1];
-    size_t m_A = (size_t)std::strtoull(argv[2], nullptr, 10);
-    size_t m_B = (size_t)std::strtoull(argv[3], nullptr, 10);
-    size_t n_pts = m_A + m_B + 1;
+    size_t n_pts = (size_t)std::strtoull(argv[2], nullptr, 10);
+    size_t d = (size_t)std::strtoull(argv[3], nullptr, 10);
+    const size_t additive_coeffs = 2 * d + 1;
+    const size_t mask_coeffs = d + 1;
 
     std::vector<BICYCL::Mpz> b_coeffs, a_coeffs;
     int arg = 4;
@@ -36,7 +37,7 @@ int main(int argc, char** argv)
         BICYCL::RandGen rng = make_secure_randgen();
         CG_AHE::CG_Scheme cg = make_cg_scheme(rng);
         uint64_t domain = std::strtoull(argv[arg + 1], nullptr, 0);
-        b_coeffs = benchmark_input_vector(m_A + 1, domain, cg.cs().cleartext_bound());
+        b_coeffs = benchmark_input_vector(additive_coeffs, domain, cg.cs().cleartext_bound());
         arg += 2;
     } else if (b_file) {
         if (argc < arg + 2) {
@@ -61,7 +62,7 @@ int main(int argc, char** argv)
     const int a_begin = arg;
     bool a_bench64 = (arg < argc && std::string(argv[arg]) == "--bench64");
     bool a_file = (arg < argc && std::string(argv[arg]) == "--input-file");
-    int a_end = a_begin + (int)m_A + 1;
+    int a_end = a_begin + (int)mask_coeffs;
     if (a_bench64) {
         if (argc < arg + 2) {
             std::cerr << "[opa_sender] --bench64 for a needs a domain seed\n";
@@ -70,7 +71,7 @@ int main(int argc, char** argv)
         BICYCL::RandGen rng = make_secure_randgen();
         CG_AHE::CG_Scheme cg = make_cg_scheme(rng);
         uint64_t domain = std::strtoull(argv[arg + 1], nullptr, 0);
-        a_coeffs = benchmark_input_vector(m_A + 1, domain, cg.cs().cleartext_bound());
+        a_coeffs = benchmark_input_vector(mask_coeffs, domain, cg.cs().cleartext_bound());
         a_end = arg + 2;
     } else if (a_file) {
         if (argc < arg + 2) {
@@ -85,7 +86,7 @@ int main(int argc, char** argv)
         a_end = arg + 2;
     } else {
         if (argc < a_end) {
-            std::cerr << "[opa_sender] need exactly m_A+1=" << (m_A + 1)
+            std::cerr << "[opa_sender] need exactly d+1=" << mask_coeffs
                       << " coefficients after --\n";
             return 1;
         }
@@ -93,9 +94,10 @@ int main(int argc, char** argv)
             a_coeffs.emplace_back(std::string(argv[arg]).c_str());
     }
 
-    if (b_coeffs.size() != m_A + 1 || a_coeffs.size() != m_A + 1) {
-        std::cerr << "[opa_sender] need exactly m_A+1=" << (m_A + 1)
-                  << " coefficients for each sender polynomial\n";
+    if (b_coeffs.size() != additive_coeffs || a_coeffs.size() != mask_coeffs) {
+        std::cerr << "[opa_sender] need exactly 2d+1=" << additive_coeffs
+                  << " additive coefficients and d+1=" << mask_coeffs
+                  << " mask coefficients\n";
         return 1;
     }
 

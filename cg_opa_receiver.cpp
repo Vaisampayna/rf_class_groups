@@ -14,26 +14,26 @@ int main(int argc, char** argv)
 {
     if (argc < 4) {
         std::cerr << "Usage: " << argv[0]
-                  << " <m_A> <m_B> <receiver_poly_0> ... <receiver_poly_m_B> [port]\n";
+                  << " <n_pts> <d> <receiver_poly_0> ... <receiver_poly_d> [port]\n";
         return 2;
     }
 
-    size_t m_A = (size_t)std::strtoull(argv[1], nullptr, 10);
-    size_t m_B = (size_t)std::strtoull(argv[2], nullptr, 10);
-    size_t n_pts = m_A + m_B + 1;
+    size_t n_pts = (size_t)std::strtoull(argv[1], nullptr, 10);
+    size_t d = (size_t)std::strtoull(argv[2], nullptr, 10);
+    const size_t receiver_coeffs = d + 1;
 
     const int coeff_begin = 3;
-    const int coeff_end = coeff_begin + (int)m_B + 1;
+    const int coeff_end = coeff_begin + (int)receiver_coeffs;
     const bool bench64 = (argc > coeff_begin && std::string(argv[coeff_begin]) == "--bench64");
     const bool file_input = (argc > coeff_begin && std::string(argv[coeff_begin]) == "--input-file");
     if (!bench64 && !file_input && argc < coeff_end) {
-        std::cerr << "[opa_receiver] need exactly m_B+1=" << (m_B + 1)
+        std::cerr << "[opa_receiver] need exactly d+1=" << receiver_coeffs
                   << " coefficients\n";
         return 1;
     }
 
     std::vector<BICYCL::Mpz> coeffs;
-    coeffs.reserve(m_B + 1);
+    coeffs.reserve(receiver_coeffs);
     if (bench64) {
         if (argc < coeff_begin + 2) {
             std::cerr << "[opa_receiver] --bench64 needs a domain seed\n";
@@ -42,7 +42,7 @@ int main(int argc, char** argv)
         BICYCL::RandGen rng = make_secure_randgen();
         CG_AHE::CG_Scheme cg = make_cg_scheme(rng);
         uint64_t domain = std::strtoull(argv[coeff_begin + 1], nullptr, 0);
-        coeffs = benchmark_input_vector(m_B + 1, domain, cg.cs().cleartext_bound());
+        coeffs = benchmark_input_vector(receiver_coeffs, domain, cg.cs().cleartext_bound());
     } else if (file_input) {
         if (argc < coeff_begin + 2) {
             std::cerr << "[opa_receiver] --input-file needs a path\n";
@@ -58,8 +58,8 @@ int main(int argc, char** argv)
             coeffs.emplace_back(std::string(argv[i]).c_str());
     }
 
-    if (coeffs.size() != m_B + 1) {
-        std::cerr << "[opa_receiver] need exactly m_B+1=" << (m_B + 1)
+    if (coeffs.size() != receiver_coeffs) {
+        std::cerr << "[opa_receiver] need exactly d+1=" << receiver_coeffs
                   << " coefficients\n";
         return 1;
     }

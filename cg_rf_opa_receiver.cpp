@@ -1,13 +1,11 @@
 /**
  * cg_rf_opa_receiver.cpp — Receiver for CG-AHE RF-OPA
  *
- * Receives 2m+1 OLE outputs y_i = p_A(alpha_i) + r_A(alpha_i)*p_B(alpha_i)
+ * Receives OPA outputs y_i = p_A(alpha_i) + r_A(alpha_i)*p_B(alpha_i)
  * These are the evaluations of p_inter at evaluation points.
  * Prints the evaluation points and values (for verification or further use).
  *
- * Usage: ./cg_rf_opa_receiver <m> <pB_0> ... <pB_m>
- * Example (m=2): ./cg_rf_opa_receiver 2 1 0 1
- *   p_B(X) = X^2 + 1
+ * Usage: ./cg_rf_opa_receiver <n_pts> <d> <pB_0> ... <pB_d>
  */
 #include "cg_rf_opa.hpp"
 /*
@@ -22,13 +20,13 @@
 
 int main(int argc, char** argv) {
     if (argc < 3) {
-        std::cerr << "Usage: " << argv[0] << " <m_A> <m_B> <pB_0> ... <pB_m_B>\n";
+        std::cerr << "Usage: " << argv[0] << " <n_pts> <d> <pB_0> ... <pB_d>\n";
         return 2;
     }
 
-    size_t m_A = (size_t)std::atoi(argv[1]);
-    size_t m_B = (size_t)std::atoi(argv[2]);
-    size_t n_pts = m_A + m_B + 1;
+    size_t n_pts = (size_t)std::strtoull(argv[1], nullptr, 10);
+    size_t d = (size_t)std::strtoull(argv[2], nullptr, 10);
+    const size_t receiver_coeffs = d + 1;
 
     std::vector<BICYCL::Mpz> pB_coeffs;
     if (argc > 3 && std::string(argv[3]) == "--bench64") {
@@ -39,7 +37,7 @@ int main(int argc, char** argv) {
         BICYCL::RandGen rng = make_secure_randgen();
         CG_AHE::CG_Scheme cg = make_cg_scheme(rng);
         uint64_t domain = std::strtoull(argv[4], nullptr, 0);
-        pB_coeffs = benchmark_input_vector(m_B + 1, domain, cg.cs().cleartext_bound());
+        pB_coeffs = benchmark_input_vector(receiver_coeffs, domain, cg.cs().cleartext_bound());
     } else if (argc > 3 && std::string(argv[3]) == "--input-file") {
         if (argc < 5) {
             std::cerr << "[opa_receiver] --input-file needs a path\n";
@@ -55,8 +53,8 @@ int main(int argc, char** argv) {
             pB_coeffs.emplace_back(std::string(argv[i]).c_str());
     }
 
-    if (pB_coeffs.size() != m_B+1) {
-        std::cerr << "[opa_receiver] need exactly m_B+1=" << m_B+1 << " coefficients\n";
+    if (pB_coeffs.size() != receiver_coeffs) {
+        std::cerr << "[opa_receiver] need exactly d+1=" << receiver_coeffs << " coefficients\n";
         return 1;
     }
 

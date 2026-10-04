@@ -116,11 +116,11 @@ bash run_2pc_rf_psi2.sh 1000
 
 The argument to these scripts is the paper-table benchmark size `N`. For OLE,
 OPE, and PSI this is direct: it is the number of OLE slots, polynomial degree
-scale, or set size. For OPA, `N` is the number of public OPA evaluation points,
-not both polynomial degrees. The OPA scripts split `N` internally so that
-`m_A + m_B + 1 = N`; for example, `bash run_2pc_rf_opa.sh 8192` uses
-`m_A=4096`, `m_B=4095`, and therefore runs `8192` RF-OLE slots. This is the
-convention used by the paper table and keeps OPA comparable with OPE.
+scale, or set size. For OPA, `N` is the number of public OPA evaluation/OLE
+slots. The scripts set `d=floor((N-2)/2)`, choose `deg(a)<=2d`,
+`deg(r)<=d`, and `deg(b)<=d`, so `2d+1 <= N`. For example,
+`bash run_2pc_rf_opa.sh 8192` uses `d=4095`, `deg(a)<=8190`,
+`deg(r),deg(b)<=4095`, and exactly `8192` RF-OLE slots.
 
 For two-way PSI (`run_2pc_direct_psi2.sh` and `run_2pc_rf_psi2.sh`), the first
 phase is the corresponding one-way PSI protocol, where Party B learns the
@@ -182,7 +182,7 @@ running the local scripts:
 
 ```bash
 CG_RF_LANES=4 bash run_rf_cg_batch_ole_local.sh 1000
-CG_RF_LANES=4 bash run_rf_cg_opa_local.sh 2 2 "1 2 1" "1 1 1" "-1 0 1"
+CG_RF_LANES=4 bash run_rf_cg_opa_local.sh 1 "1 2 3" "1 1" "-1 1"
 CG_RF_LANES=4 bash run_rf_cg_psi_local.sh 1000 1000 200 42
 ```
 
@@ -219,8 +219,12 @@ that same convention:
 - Batched OLE / RF-OLE: `N` OLE instances.
 - 3-round OLE / 3-round RF-OLE: `N` OLE instances.
 - OPE / RF-OPE: degree-scale `N`, implemented with about `N` OLE slots.
-- OPA / RF-OPA: `N` public evaluation points. The scripts choose polynomial
-  degrees `m_A` and `m_B` satisfying `m_A + m_B + 1 = N`.
+- OPA / RF-OPA: `N` public evaluation/OLE slots. The scripts choose
+  `d=floor((N-2)/2)`, so Party A's additive polynomial has degree at most
+  `2d`, Party A's random mask polynomial has degree at most `d`, and Party B's
+  polynomial has degree at most `d`. Since `2d+1 <= N`, the outputs determine
+  the masked degree-`2d` polynomial; for power-of-two `N`, the public OPA
+  evaluation domain is NTT-friendly.
 - One-way PSI / RF-PSI: both sets have size `N`.
 - Two-way PSI / RF-PSI: both sets have size `N`; the two-way variant is
   one-way PSI plus a reveal-back phase. Direct two-way PSI sends fixed

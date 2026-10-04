@@ -119,12 +119,10 @@ inline void write_opa_sender_coeffs(
     const std::vector<BICYCL::Mpz>& b_coeffs,
     const std::vector<BICYCL::Mpz>& a_coeffs)
 {
-    if (b_coeffs.size() != a_coeffs.size())
-        throw std::runtime_error("OPA sender dump size mismatch");
     std::ofstream out(cg_bench_io_path(filename));
     if (!out) throw std::runtime_error("cannot open OPA sender dump");
-    out << "OPA_SENDER_V1\n";
-    out << b_coeffs.size() << "\n";
+    out << "OPA_SENDER_V2\n";
+    out << b_coeffs.size() << " " << a_coeffs.size() << "\n";
     out << q << "\n";
     for (const auto& c : b_coeffs)
         out << c << "\n";

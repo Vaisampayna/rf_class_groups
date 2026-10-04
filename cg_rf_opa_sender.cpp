@@ -11,9 +11,7 @@
  * The 4 RF processes (rf_receiver, rf_receiver_firewall, rf_sender_firewall)
  * are reused unchanged — they simply loop over N_OLE iterations.
  *
- * Usage: ./cg_rf_opa_sender <m> <p_A coeffs space-sep> -- <r_A coeffs space-sep>
- * Example (m=2): ./cg_rf_opa_sender 2 1 2 3 -- 4 5 6
- *   p_A(X) = 3X^2+2X+1,  r_A(X) = 6X^2+5X+4
+ * Usage: ./cg_rf_opa_sender <n_pts> <d> <p_A coeffs degree 2d> -- <r_A coeffs degree d>
  */
 #include "cg_rf_opa.hpp"
 /*
@@ -29,13 +27,14 @@
 
 int main(int argc, char** argv) {
     if (argc < 3) {
-        std::cerr << "Usage: " << argv[0] << " <m_A> <m_B> <pA_0> ... <pA_m_A> -- <rA_0> ... <rA_m_A>\n";
+        std::cerr << "Usage: " << argv[0] << " <n_pts> <d> <pA_0> ... <pA_2d> -- <rA_0> ... <rA_d>\n";
         return 2;
     }
 
-    size_t m_A = (size_t)std::atoi(argv[1]);
-    size_t m_B = (size_t)std::atoi(argv[2]);
-    size_t n_pts = m_A + m_B + 1;   // number of evaluation points
+    size_t n_pts = (size_t)std::strtoull(argv[1], nullptr, 10);
+    size_t d = (size_t)std::strtoull(argv[2], nullptr, 10);
+    const size_t additive_coeffs = 2 * d + 1;
+    const size_t mask_coeffs = d + 1;
 
     // Parse p_A and r_A coefficients from argv
     std::vector<BICYCL::Mpz> pA_coeffs, rA_coeffs;
@@ -48,7 +47,7 @@ int main(int argc, char** argv) {
         BICYCL::RandGen rng = make_secure_randgen();
         CG_AHE::CG_Scheme cg = make_cg_scheme(rng);
         uint64_t domain = std::strtoull(argv[arg + 1], nullptr, 0);
-        pA_coeffs = benchmark_input_vector(m_A + 1, domain, cg.cs().cleartext_bound());
+        pA_coeffs = benchmark_input_vector(additive_coeffs, domain, cg.cs().cleartext_bound());
         arg += 2;
     } else if (arg < argc && std::string(argv[arg]) == "--input-file") {
         if (argc < arg + 2) {
@@ -74,7 +73,7 @@ int main(int argc, char** argv) {
         BICYCL::RandGen rng = make_secure_randgen();
         CG_AHE::CG_Scheme cg = make_cg_scheme(rng);
         uint64_t domain = std::strtoull(argv[arg + 1], nullptr, 0);
-        rA_coeffs = benchmark_input_vector(m_A + 1, domain, cg.cs().cleartext_bound());
+        rA_coeffs = benchmark_input_vector(mask_coeffs, domain, cg.cs().cleartext_bound());
     } else if (arg < argc && std::string(argv[arg]) == "--input-file") {
         if (argc < arg + 2) {
             std::cerr << "[opa_sender] --input-file for rA needs a path\n";
@@ -90,8 +89,10 @@ int main(int argc, char** argv) {
             rA_coeffs.emplace_back(std::string(argv[arg]).c_str());
     }
 
-    if (pA_coeffs.size() != m_A+1 || rA_coeffs.size() != m_A+1) {
-        std::cerr << "[opa_sender] need exactly m_A+1=" << m_A+1 << " coefficients each\n";
+    if (pA_coeffs.size() != additive_coeffs || rA_coeffs.size() != mask_coeffs) {
+        std::cerr << "[opa_sender] need exactly 2d+1=" << additive_coeffs
+                  << " additive coefficients and d+1=" << mask_coeffs
+                  << " mask coefficients\n";
         return 1;
     }
 

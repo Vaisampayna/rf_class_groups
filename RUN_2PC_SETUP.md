@@ -273,27 +273,29 @@ export CG_CONNECT_RETRIES=7200
 
 Prepare coefficient files on the two protocol machines. Coefficients are in constant-term-first order.
 
-Receiver side, `<party-b-ip>`, needs `pB.txt` with `m_B+1` coefficients:
+Receiver side, `<party-b-ip>`, needs `pB.txt` with `d+1` coefficients:
 
 ```bash
 ssh <party-b-user>@<party-b-ip> \
-  'mkdir -p /tmp/cg_inputs && printf "1\n0\n1\n" > /tmp/cg_inputs/pB.txt'
+  'mkdir -p /tmp/cg_inputs && printf -- "-1\n1\n" > /tmp/cg_inputs/pB.txt'
 ```
 
-Sender side, `<party-a-ip>`, needs `pA.txt` and `rA.txt`, each with `m_A+1` coefficients:
+Sender side, `<party-a-ip>`, needs `pA.txt` with `2d+1` coefficients and
+`rA.txt` with `d+1` coefficients:
 
 ```bash
 ssh <party-a-user>@<party-a-ip> \
-  'mkdir -p /tmp/cg_inputs && printf "1\n2\n1\n" > /tmp/cg_inputs/pA.txt && printf "1\n1\n1\n" > /tmp/cg_inputs/rA.txt'
+  'mkdir -p /tmp/cg_inputs && printf "1\n2\n3\n" > /tmp/cg_inputs/pA.txt && printf "1\n1\n" > /tmp/cg_inputs/rA.txt'
 ```
 
-Run receiver side first, then sender side. This example uses `m_A=2`, `m_B=2`.
+Run receiver side first, then sender side. This example uses `d=1`, so
+`n_pts=2d+1=3`.
 
 ```bash
 ssh <party-b-user>@<party-b-ip> \
   'cd <party-b-repo-path>/build-2pc;
-   export CG_Q_NBITS=128 CG_K=1 CG_BENCH_INPUT_BITS=128 CG_RF_LANES=8 CG_RF_CHUNK_SIZE=128 CG_CONNECT_RETRIES=7200 CG_RF_THREADS=28;
-   ./cg_rf_opa_receiver 2 2 --input-file /tmp/cg_inputs/pB.txt > ../logs/opa_receiver.log 2>&1 &
+   export CG_Q_NBITS=128 CG_K=1 CG_BENCH_INPUT_BITS=128 CG_RF_LANES=8 CG_RF_CHUNK_SIZE=128 CG_CONNECT_RETRIES=7200 CG_RF_THREADS=28 CG_RF_EXPECTED_N=3;
+   ./cg_rf_opa_receiver 3 1 --input-file /tmp/cg_inputs/pB.txt > ../logs/opa_receiver.log 2>&1 &
    ./cg_rf_receiver_firewall_opa > ../logs/opa_rf_receiver.log 2>&1;
    wait'
 ```
@@ -301,10 +303,10 @@ ssh <party-b-user>@<party-b-ip> \
 ```bash
 ssh <party-a-user>@<party-a-ip> \
   'cd <party-a-repo-path>/build-2pc;
-   export CG_Q_NBITS=128 CG_K=1 CG_BENCH_INPUT_BITS=128 CG_RF_LANES=8 CG_RF_CHUNK_SIZE=128 CG_CONNECT_RETRIES=7200 CG_RF_THREADS=32;
+   export CG_Q_NBITS=128 CG_K=1 CG_BENCH_INPUT_BITS=128 CG_RF_LANES=8 CG_RF_CHUNK_SIZE=128 CG_CONNECT_RETRIES=7200 CG_RF_THREADS=32 CG_RF_EXPECTED_N=3;
    ./cg_rf_sender_firewall_opa <party-b-ip> > ../logs/opa_rf_sender.log 2>&1 &
    sleep 1;
-   ./cg_rf_opa_sender 2 2 --input-file /tmp/cg_inputs/pA.txt -- --input-file /tmp/cg_inputs/rA.txt > ../logs/opa_sender.log 2>&1;
+   ./cg_rf_opa_sender 3 1 --input-file /tmp/cg_inputs/pA.txt -- --input-file /tmp/cg_inputs/rA.txt > ../logs/opa_sender.log 2>&1;
    wait'
 ```
 

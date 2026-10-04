@@ -25,11 +25,19 @@ int main(int argc, char** argv)
     }
 
     std::string magic_s, magic_r;
-    size_t sender_degree_plus_1 = 0, receiver_degree_plus_1 = 0, n_pts = 0;
-    sin >> magic_s >> sender_degree_plus_1;
+    size_t additive_degree_plus_1 = 0, mask_degree_plus_1 = 0;
+    size_t receiver_degree_plus_1 = 0, n_pts = 0;
+    sin >> magic_s;
+    if (magic_s == "OPA_SENDER_V1") {
+        sin >> additive_degree_plus_1;
+        mask_degree_plus_1 = additive_degree_plus_1;
+    } else if (magic_s == "OPA_SENDER_V2") {
+        sin >> additive_degree_plus_1 >> mask_degree_plus_1;
+    }
     rin >> magic_r >> receiver_degree_plus_1 >> n_pts;
-    if (magic_s != "OPA_SENDER_V1" || magic_r != "OPA_RECEIVER_V1" ||
-        sender_degree_plus_1 == 0 || receiver_degree_plus_1 == 0 || n_pts == 0) {
+    if ((magic_s != "OPA_SENDER_V1" && magic_s != "OPA_SENDER_V2") ||
+        magic_r != "OPA_RECEIVER_V1" || additive_degree_plus_1 == 0 ||
+        mask_degree_plus_1 == 0 || receiver_degree_plus_1 == 0 || n_pts == 0) {
         std::cerr << "[check_opa] bad file format\n";
         return 2;
     }
@@ -42,8 +50,8 @@ int main(int argc, char** argv)
     }
     const BICYCL::Mpz& q = q_sender;
 
-    std::vector<BICYCL::Mpz> b_coeffs(sender_degree_plus_1);
-    std::vector<BICYCL::Mpz> a_coeffs(sender_degree_plus_1);
+    std::vector<BICYCL::Mpz> b_coeffs(additive_degree_plus_1);
+    std::vector<BICYCL::Mpz> a_coeffs(mask_degree_plus_1);
     std::vector<BICYCL::Mpz> pB_coeffs(receiver_degree_plus_1);
 
     for (auto& c : b_coeffs)
