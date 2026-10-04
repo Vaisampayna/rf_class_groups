@@ -219,6 +219,9 @@ inline std::vector<BICYCL::Mpz> direct_ole_batch_receive(
                   << (N ? dec_sum / (double)N : 0.0) << " ms/op\n";
     }
 
+    // Fixed transport ACK: lets the sender avoid closing sockets while the
+    // receiver is still draining the final response chunk.
+    CGNet::send_u32(fds[0], 0u);
     close_rf_lanes(fds);
     return y_vals;
 }
@@ -305,5 +308,6 @@ inline void direct_ole_batch_send(
                   << (N ? add_sum / (double)N : 0.0) << " ms/op\n";
     }
 
+    (void)CGNet::recv_u32(fds[0]);
     close_rf_lanes(fds);
 }
