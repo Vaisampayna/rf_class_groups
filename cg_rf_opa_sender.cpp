@@ -3,7 +3,7 @@
  *
  * Oblivious Polynomial Addition:
  *   p_inter(X) = p_A(X) + r_A(X) * p_B(X)
- *   Evaluated at 2m+1 points alpha_i = i+1.
+ *   Evaluated at n_pts public points alpha_i.
  *   For each point i: OLE with (a_i = r_A(alpha_i), b_i = p_A(alpha_i), x_i = p_B(alpha_i))
  *   => y_i = a_i * x_i + b_i = p_inter(alpha_i)
  *

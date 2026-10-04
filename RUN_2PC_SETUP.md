@@ -28,14 +28,14 @@ rsync -az --delete \
   --exclude build --exclude build-portable --exclude build-2pc \
   --exclude logs --exclude 'benchmark_2pc_*' \
   --exclude '*.pdf' --exclude '*.html' \
-  reverse_firewall_cg/ \
+  rf_class_groups/ \
   <party-b-user>@<party-b-ip>:<party-b-repo-path>/
 
 rsync -az --delete \
   --exclude build --exclude build-portable --exclude build-2pc \
   --exclude logs --exclude 'benchmark_2pc_*' \
   --exclude '*.pdf' --exclude '*.html' \
-  reverse_firewall_cg/ \
+  rf_class_groups/ \
   <party-a-user>@<party-a-ip>:<party-a-repo-path>/
 ```
 
@@ -113,8 +113,8 @@ CG_USE_NTT_POLY=1 \
 CG_BENCH_INPUT_BITS=128 \
 CG_PSI_INPUT_BITS=128 \
 CG_RF_LANES=8 \
-CG_RF_THREADS_LOCAL=28 \
-CG_RF_THREADS_REMOTE=32 \
+CG_RF_THREADS_LOCAL=<party-b-thread-count> \
+CG_RF_THREADS_REMOTE=<party-a-thread-count> \
 CG_RF_CHUNK_SIZE=128 \
 CG_CONNECT_RETRIES=7200 \
 TIMEOUT_S=1800 \
@@ -183,8 +183,8 @@ CG_USE_NTT_POLY=1 \
 CG_BENCH_INPUT_BITS=128 \
 CG_PSI_INPUT_BITS=128 \
 CG_RF_LANES=8 \
-CG_RF_THREADS_LOCAL=28 \
-CG_RF_THREADS_REMOTE=32 \
+CG_RF_THREADS_LOCAL=<party-b-thread-count> \
+CG_RF_THREADS_REMOTE=<party-a-thread-count> \
 CG_RF_CHUNK_SIZE=128 \
 CG_CONNECT_RETRIES=7200 \
 TIMEOUT_S=7200 \

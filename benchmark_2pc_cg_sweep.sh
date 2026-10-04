@@ -8,10 +8,10 @@ REMOTE_USER="${REMOTE_USER:-party_a_user}"
 LOCAL="${LOCAL_USER}@${LOCAL_IP}"
 REMOTE="${REMOTE_USER}@${REMOTE_IP}"
 
-LOCAL_ROOT="${LOCAL_ROOT:-/path/to/party_b/reverse_firewall_cg}"
-REMOTE_ROOT="${REMOTE_ROOT:-/path/to/party_a/reverse_firewall_cg}"
+LOCAL_ROOT="${LOCAL_ROOT:-/path/to/party_b/rf_class_groups}"
+REMOTE_ROOT="${REMOTE_ROOT:-/path/to/party_a/rf_class_groups}"
 BUILD_DIR="${BUILD_DIR:-build-2pc}"
-CHECKER_DIR="${CHECKER_DIR:-/path/to/controller/reverse_firewall_cg/build-portable}"
+CHECKER_DIR="${CHECKER_DIR:-/path/to/controller/rf_class_groups/build-portable}"
 
 SIZES=("$@")
 if [[ "$#" -eq 0 ]]; then
@@ -19,7 +19,7 @@ if [[ "$#" -eq 0 ]]; then
 fi
 
 STAMP="$(TZ=UTC date +%Y%m%d_%H%M%S_UTC)"
-OUT_DIR="${OUT_DIR:-/path/to/controller/reverse_firewall_cg/benchmark_2pc_cg_sweep_${STAMP}}"
+OUT_DIR="${OUT_DIR:-/path/to/controller/rf_class_groups/benchmark_2pc_cg_sweep_${STAMP}}"
 RAW_DIR="$OUT_DIR/raw"
 IO_DIR="$OUT_DIR/io"
 mkdir -p "$RAW_DIR" "$IO_DIR"

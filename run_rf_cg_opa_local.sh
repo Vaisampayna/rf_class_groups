@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# run_rf_cg_opa_local.sh — Launch 4 CG-AHE RF-OPA processes on localhost
+# run_rf_cg_opa_local.sh - launch the RF-OPA party/firewall processes on localhost
 #
 # Usage: bash run_rf_cg_opa_local.sh <d> "<pA coeffs degree 2d>" "<pB coeffs degree d>"
 # Example (d=1):

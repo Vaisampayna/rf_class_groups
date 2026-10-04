@@ -21,8 +21,8 @@ REMOTE_USER="${REMOTE_USER:-party_a_user}"
 LOCAL="${LOCAL_USER}@${LOCAL_IP}"
 REMOTE="${REMOTE_USER}@${REMOTE_IP}"
 
-LOCAL_ROOT="${LOCAL_ROOT:-/path/to/party_b/reverse_firewall_cg}"
-REMOTE_ROOT="${REMOTE_ROOT:-/path/to/party_a/reverse_firewall_cg}"
+LOCAL_ROOT="${LOCAL_ROOT:-/path/to/party_b/rf_class_groups}"
+REMOTE_ROOT="${REMOTE_ROOT:-/path/to/party_a/rf_class_groups}"
 BUILD_DIR="${BUILD_DIR:-build-2pc}"
 CHECKER_DIR="${CHECKER_DIR:-$SCRIPT_ROOT/build-portable}"
 

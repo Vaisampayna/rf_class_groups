@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(reverse_firewall_cg CXX)
+project(rf_class_groups CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

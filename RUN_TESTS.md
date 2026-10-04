@@ -1,6 +1,6 @@
 # Running Local Tests
 
-Run these commands from the `reverse_firewall_cg` directory after building:
+Run these commands from the `rf_class_groups` directory after building:
 
 ```bash
 sudo apt-get install -y build-essential cmake libgmp-dev libssl-dev libntl-dev

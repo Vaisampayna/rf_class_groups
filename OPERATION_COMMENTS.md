@@ -1,4 +1,4 @@
-# reverse_firewall_cg Operation Comments
+# rf_class_groups Operation Comments
 
 This file describes the source files used by the reported CG-AHE
 reverse-firewall experiments. Generated build directories, benchmark logs, and
@@ -112,7 +112,7 @@ the receiver decrypts it.
   `run_2pc_rf_ope.sh`, `run_2pc_direct_opa.sh`, `run_2pc_rf_opa.sh`,
   `run_2pc_direct_psi.sh`, `run_2pc_rf_psi.sh`, `run_2pc_direct_psi2.sh`, and
   `run_2pc_rf_psi2.sh` run one two-machine experiment each.
-- `benchmark_2pc_cg_sweep.sh`, `benchmark_2pc_ole3_sweep.sh`,
+- `benchmark_2pc_cg_sweep.sh`, `benchmark_2pc_paper_all.sh`,
   `run_2pc_direct_psi2_sweep.sh`, and `run_2pc_rf_psi2_sweep.sh` run the
   table-style sweeps.
 - `make_reported_total_table.py` reconstructs the total-time table from raw
