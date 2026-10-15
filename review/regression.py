@@ -1,5 +1,3 @@
-"""Regression checks for the fixes in code_review_report.md.
-
 Run python3 review/regression.py --build-dir build-review after building.
 Tests use temporary artifacts and owned processes; no SSH or port cleanup.
 """
