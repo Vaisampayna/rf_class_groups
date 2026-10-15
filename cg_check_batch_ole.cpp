@@ -35,7 +35,9 @@ int main(int argc, char** argv)
         return 2;
     }
 
+    cg_validate_count(ns);
     BICYCL::Mpz q = read_mpz_text(rin);
+    if (q <= BICYCL::Mpz(1UL)) throw std::runtime_error("invalid checker modulus");
     std::vector<BICYCL::Mpz> a_blind_sum(ns, BICYCL::Mpz(0UL));
     std::vector<BICYCL::Mpz> b_blind_sum(ns, BICYCL::Mpz(0UL));
     if (argc == 5) {

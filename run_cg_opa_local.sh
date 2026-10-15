@@ -7,6 +7,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+source "$ROOT/scripts/run_common.sh"
+cg_run_init local
 BUILD_DIR="${CG_BUILD_DIR:-$ROOT/build-portable}"
 D="${1:-1}"
 N_PTS="$((2 * D + 1))"
@@ -20,10 +22,9 @@ if [[ ! -x "$BUILD_DIR/cg_opa_receiver" || ! -x "$BUILD_DIR/cg_opa_sender" ]]; t
     cmake --build "$BUILD_DIR" --target cg_opa_receiver cg_opa_sender -j
 fi
 
-LOG_DIR="$ROOT/logs/opa_direct"
+LOG_DIR="$CG_RUN_LOG_DIR/opa_direct"
 mkdir -p "$LOG_DIR"
 rm -f "$LOG_DIR"/receiver.log "$LOG_DIR"/sender.log
-fuser -k "$PORT/tcp" 2>/dev/null || true
 sleep 1
 
 echo "=== Direct OPA over batched OLE: d=$D, n_pts=$N_PTS, lanes=$CG_RF_LANES ==="
@@ -37,16 +38,7 @@ sleep 1
 "$BUILD_DIR/cg_opa_sender" 127.0.0.1 "$N_PTS" "$D" $PA "$PORT" >"$LOG_DIR/sender.log" 2>&1 &
 PID_S=$!
 
-if ! wait "$PID_R"; then
-    echo "ERROR: OPA receiver failed. Log follows:" >&2
-    cat "$LOG_DIR/receiver.log" >&2 2>/dev/null || true
-    exit 1
-fi
-if ! wait "$PID_S"; then
-    echo "ERROR: OPA sender failed. Log follows:" >&2
-    cat "$LOG_DIR/sender.log" >&2 2>/dev/null || true
-    exit 1
-fi
+cg_wait_all "$PID_R" "$PID_S"
 
 echo "=== Direct OPA Results ==="
 cat "$LOG_DIR/receiver.log"

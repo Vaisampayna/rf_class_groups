@@ -9,7 +9,7 @@
 #include <iostream>
 
 int main(int argc, char* argv[]) {
-    size_t n_oles = (argc > 1) ? std::atoi(argv[1]) : 1000;
+    size_t n_oles = (argc > 1) ? cg_parse_size(argv[1], "n_oles") : 1000;
     const char* input_file = nullptr;
     for (int i = 2; i < argc; ++i) {
         std::string arg = argv[i];

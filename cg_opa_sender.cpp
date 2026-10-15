@@ -20,9 +20,9 @@ int main(int argc, char** argv)
     }
 
     const char* receiver_ip = argv[1];
-    size_t n_pts = (size_t)std::strtoull(argv[2], nullptr, 10);
-    size_t d = (size_t)std::strtoull(argv[3], nullptr, 10);
-    const size_t additive_coeffs = 2 * d + 1;
+    size_t n_pts = (size_t)cg_parse_size(argv[2]);
+    size_t d = (size_t)cg_parse_size(argv[3], "degree", true);
+    const size_t additive_coeffs = cg_checked_add(cg_checked_add(d, d), 1);
 
     BICYCL::RandGen rng = make_secure_randgen();
     CG_AHE::CG_Scheme cg = make_cg_scheme(rng);
@@ -37,7 +37,7 @@ int main(int argc, char** argv)
             std::cerr << "[opa_sender] --bench64 for b needs a domain seed\n";
             return 1;
         }
-        uint64_t domain = std::strtoull(argv[arg + 1], nullptr, 0);
+        uint64_t domain = cg_parse_u64(argv[arg + 1], "argument", 0);
         additive_coeffs_A = benchmark_input_vector(additive_coeffs, domain, q);
         arg += 2;
     } else if (b_file) {

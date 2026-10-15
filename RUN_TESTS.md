@@ -5,7 +5,9 @@ Run these commands from the `rf_class_groups` directory after building:
 ```bash
 sudo apt-get install -y build-essential cmake libgmp-dev libssl-dev libntl-dev
 cmake -S . -B build
-cmake --build build -j
+cmake --build build -j2
+export CG_BUILD_DIR="$PWD/build"
+export CG_RF_THREADS=2
 ```
 
 ## Batched RF-OLE
@@ -42,7 +44,7 @@ Existing set files:
 CG_RF_LANES=4 bash run_rf_cg_psi_local.sh --files set_A.txt set_B.txt true_intersection.txt
 ```
 
-The script writes `logs/intersection_out.txt` and runs the external correctness
+The script writes `logs/run_<session>/intersection_out.txt` and runs the external correctness
 checker against `true_intersection.txt`.
 
 ## Two-Machine Scripts
@@ -53,8 +55,22 @@ is `benchmark_2pc_paper_all.sh`.
 
 ## Logs
 
-While a local test is running, inspect progress with:
+List the generated process logs with:
 
 ```bash
-tail -f logs/*.log
+find logs -name '*.log' -type f -print
 ```
+
+## Automated regression suite
+
+After building with `BUILD_TESTING=ON` (the default):
+
+```bash
+ctest --test-dir build --output-on-failure
+```
+
+Local launchers isolate logs under `logs/run_<session>/`. Protocol sockets use
+TCP. Tests cover TCP serialization,
+optional parameter checks, input validation, timing completeness, and small
+protocol runs using temporary files and local sockets. The two-way PSI tests
+also verify the documented zero-padding collision. No SSH is required.

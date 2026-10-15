@@ -9,6 +9,7 @@
 #include <iostream>
 
 int main() {
+    const size_t reveal_bound = required_env_size("CG_PSI2_REVEAL_BOUND");
     const char* port_rec = env_or_default("CG_PSI2_REVEAL_REC", "9043");
     const char* port_rfr = env_or_default("CG_PSI2_REVEAL_RFR", "9042");
     const size_t LANES = rf_transport_lanes();
@@ -20,19 +21,18 @@ int main() {
     auto& pool = global_pool();
     prewarm_batch_pool();
 
-    std::vector<int> rec_fds = connect_rf_lanes(LOCALHOST, port_rec, LANES);
+    std::vector<int> rec_fds = connect_rf_lanes(LOCALHOST, port_rec, LANES, reveal_bound);
     int lfd = CGNet::listen_tcp(port_rfr);
     std::cerr << "[psi2_reveal_rrf] listening on :" << port_rfr
               << " for " << LANES << " reveal lane(s)\n";
-    std::vector<int> srf_fds = accept_rf_lanes(lfd, LANES);
-    close(lfd);
+    std::vector<int> srf_fds = accept_rf_lanes(lfd, LANES, reveal_bound);
+    CGNet::close_tcp(lfd);
 
     CG_AHE::PublicKey pk_prime = CGNet::recv_pk(srf_fds[0], cs);
     BICYCL::Mpz rho = rng.random_mpz(cs.secretkey_bound());
     CG_AHE::PublicKey pk_double = maul_pk(pk_prime, rho, cs);
     CGNet::send_pk(rec_fds[0], pk_double);
 
-    const size_t reveal_bound = required_env_size("CG_PSI2_REVEAL_BOUND");
     const size_t count = reveal_bound;
 
     std::vector<CG_AHE::CipherText> in_buf(count), out_buf(count);

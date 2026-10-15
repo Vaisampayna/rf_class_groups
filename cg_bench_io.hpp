@@ -88,8 +88,8 @@ inline void write_ope_sender_coeffs(
     const BICYCL::Mpz& q,
     const std::vector<BICYCL::Mpz>& coeffs)
 {
-    // OPE verification recomputes p(alpha) directly from Alice's polynomial
-    // and compares it with Bob's protocol output.
+    // OPE verification recomputes p(alpha) directly from the sender polynomial
+    // and compares it with the receiver protocol output.
     std::ofstream out(cg_bench_io_path(filename));
     if (!out) throw std::runtime_error("cannot open OPE sender dump");
     out << "OPE_SENDER_V1\n";
@@ -172,23 +172,21 @@ read_ole_sender_input_file(
 
     std::vector<BICYCL::Mpz> a_vals;
     std::vector<BICYCL::Mpz> b_vals;
-    std::string a_tok, b_tok;
-    while (in >> a_tok >> b_tok) {
-        BICYCL::Mpz a(a_tok.c_str());
-        BICYCL::Mpz b(b_tok.c_str());
-        if (a.sgn() < 0 || b.sgn() < 0) {
-            std::ostringstream oss;
-            oss << role << ": negative OLE sender value in "
-                << path;
-            throw std::runtime_error(oss.str());
-        }
-        BICYCL::Mpz::mod(a, a, q);
-        BICYCL::Mpz::mod(b, b, q);
-        a_vals.push_back(a);
-        b_vals.push_back(b);
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.find_first_not_of(" \t\r") == std::string::npos) continue;
+        std::istringstream row(line);
+        std::string a_tok, b_tok, extra;
+        if (!(row >> a_tok >> b_tok) || row >> extra)
+            throw std::runtime_error(std::string(role) + ": expected exactly two values per OLE row");
+        BICYCL::Mpz a(a_tok), b(b_tok);
+        if (a.sgn() < 0 || b.sgn() < 0)
+            throw std::runtime_error(std::string(role) + ": negative OLE sender input");
+        BICYCL::Mpz::mod(a, a, q); BICYCL::Mpz::mod(b, b, q);
+        cg_validate_count(a_vals.size() + 1);
+        a_vals.push_back(a); b_vals.push_back(b);
     }
-    if (!in.eof())
-        throw std::runtime_error(std::string(role) + ": malformed OLE sender input file " + path);
+    if (in.bad()) throw std::runtime_error("failed reading OLE input file");
     if (a_vals.empty())
         throw std::runtime_error(std::string(role) + ": OLE sender input file is empty: " + path);
     return {std::move(a_vals), std::move(b_vals)};

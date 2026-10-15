@@ -65,11 +65,12 @@ int main(int argc, char **argv) {
     int fd_srf = connect_tcp(role, srf_host, srf_port);
 
     int fd_recv = accept_tcp(role, lfd_recv);
-    close(lfd_recv);
+    CGNet::close_tcp(lfd_recv);
     fprintf(stderr, "[R-RF] Receiver connected.\n");
 
     // ── Receive pk and n_oles from Receiver ───────────────────
     uint64_t n_oles = recv_u64(role, fd_recv);
+    cg_validate_count(n_oles);
     PublicKey pk = recv_pk(role, fd_recv, cs);
 
     // Sample γ from D_q (same distribution as the secret key).
@@ -153,8 +154,8 @@ int main(int argc, char **argv) {
     uint32_t ver = recv_u32(role, fd_recv);
     send_u32(role, fd_srf, ver);
 
-    close(fd_recv);
-    close(fd_srf);
+    CGNet::close_tcp(fd_recv);
+    CGNet::close_tcp(fd_srf);
     fprintf(stderr, "[R-RF] done. verified=%u\n", ver);
     return 0;
 }

@@ -14,15 +14,29 @@ fi
 #     loading and output/check file writing, and are copied into
 #     protocol_times.csv by the check_* helpers.
 SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LOCAL_IP="${LOCAL_IP:-PARTY_B_IP}"
-REMOTE_IP="${REMOTE_IP:-PARTY_A_IP}"
-LOCAL_USER="${LOCAL_USER:-party_b_user}"
-REMOTE_USER="${REMOTE_USER:-party_a_user}"
+LOCAL_IP="${LOCAL_IP:-}"
+REMOTE_IP="${REMOTE_IP:-}"
+LOCAL_USER="${LOCAL_USER:-}"
+REMOTE_USER="${REMOTE_USER:-}"
+LOCAL_ROOT="${LOCAL_ROOT:-}"
+REMOTE_ROOT="${REMOTE_ROOT:-}"
+
+missing=()
+[[ -n "$LOCAL_IP" ]] || missing+=(LOCAL_IP)
+[[ -n "$REMOTE_IP" ]] || missing+=(REMOTE_IP)
+[[ -n "$LOCAL_USER" ]] || missing+=(LOCAL_USER)
+[[ -n "$REMOTE_USER" ]] || missing+=(REMOTE_USER)
+[[ -n "$LOCAL_ROOT" ]] || missing+=(LOCAL_ROOT)
+[[ -n "$REMOTE_ROOT" ]] || missing+=(REMOTE_ROOT)
+if (( ${#missing[@]} )); then
+    printf 'Missing required 2PC setting(s): %s\n' "${missing[*]}" >&2
+    printf 'Set LOCAL_IP, REMOTE_IP, LOCAL_USER, REMOTE_USER, LOCAL_ROOT, and REMOTE_ROOT before running run_2pc_*.sh.\n' >&2
+    exit 2
+fi
+
 LOCAL="${LOCAL_USER}@${LOCAL_IP}"
 REMOTE="${REMOTE_USER}@${REMOTE_IP}"
 
-LOCAL_ROOT="${LOCAL_ROOT:-/path/to/party_b/rf_class_groups}"
-REMOTE_ROOT="${REMOTE_ROOT:-/path/to/party_a/rf_class_groups}"
 BUILD_DIR="${BUILD_DIR:-build-2pc}"
 CHECKER_DIR="${CHECKER_DIR:-$SCRIPT_ROOT/build-portable}"
 
@@ -38,9 +52,19 @@ CG_BENCH_INPUT_BITS="${CG_BENCH_INPUT_BITS:-128}"
 CG_PSI_INPUT_BITS="${CG_PSI_INPUT_BITS:-128}"
 TIMEOUT_S="${TIMEOUT_S:-3600}"
 
+CG_SESSION_ID="${CG_SESSION_ID:-$(openssl rand -hex 16)}"
+CG_USE_NTT_POLY="${CG_USE_NTT_POLY:-1}"
+CG_PUBLIC_SEED="${CG_PUBLIC_SEED:-4847948322520058953}"
+CG_IO_TIMEOUT_S="${CG_IO_TIMEOUT_S:-180}"
+CG_MAX_ITEMS="${CG_MAX_ITEMS:-1048576}"
+REMOTE_SCRATCH="/tmp/cg_run_$CG_SESSION_ID"
+
 common_env() {
     printf 'CG_RF_LANES=%q CG_RF_CHUNK_SIZE=%q CG_CONNECT_RETRIES=%q CG_Q_NBITS=%q CG_K=%q CG_FIXED_Q=%q CG_BENCH_INPUT_BITS=%q CG_PSI_INPUT_BITS=%q ' \
         "$CG_RF_LANES" "$CG_RF_CHUNK_SIZE" "$CG_CONNECT_RETRIES" "$CG_Q_NBITS" "$CG_K" "$CG_FIXED_Q" "$CG_BENCH_INPUT_BITS" "$CG_PSI_INPUT_BITS"
+    printf 'CG_SESSION_ID=%q CG_USE_NTT_POLY=%q CG_PUBLIC_SEED=%q CG_IO_TIMEOUT_S=%q CG_MAX_ITEMS=%q CG_PROTOCOL_ID=%q CG_BIND_ADDR=%q ' \
+        "$CG_SESSION_ID" "$CG_USE_NTT_POLY" "$CG_PUBLIC_SEED" "$CG_IO_TIMEOUT_S" "$CG_MAX_ITEMS" "${CG_PROTOCOL_ID:-manual}" "${CG_BIND_ADDR:-0.0.0.0}"
+    printf 'CG_MAX_MPZ_BYTES=%q CG_VALIDATE_LANES=%q ' "${CG_MAX_MPZ_BYTES:-16384}" "${CG_VALIDATE_LANES:-0}"
 }
 
 next_power_of_two() {
@@ -71,20 +95,25 @@ ssh_remote() {
 }
 
 cleanup_ports() {
-    local ports=(9001 9002 9003 9004 9010 9041 9042 9043 9103 9104 9143)
-    ssh_local "fuser -k ${ports[*]/%//tcp} >/dev/null 2>&1 || true" >/dev/null 2>&1 || true
-    ssh_remote "fuser -k ${ports[*]/%//tcp} >/dev/null 2>&1 || true" >/dev/null 2>&1 || true
-    sleep 1
+    : # Run-owned children are cleaned by remote shell traps, never fuser.
 }
 
 init_run_dir() {
     local prefix="$1"
     local stamp
     stamp="$(TZ=UTC date +%Y%m%d_%H%M%S_UTC)"
-    OUT_DIR="${OUT_DIR:-$SCRIPT_ROOT/${prefix}_${stamp}}"
+    CG_PROTOCOL_ID="$prefix"
+    OUT_DIR="${OUT_DIR:-$SCRIPT_ROOT/${prefix}_${stamp}_$CG_SESSION_ID}"
     RAW_DIR="$OUT_DIR/raw"
     IO_DIR="$OUT_DIR/io"
     mkdir -p "$RAW_DIR" "$IO_DIR"
+    {
+        printf 'transport=plain_tcp\nvalidate_lanes=%s\n' "${CG_VALIDATE_LANES:-0}"
+        printf 'direct_psi2_padding=zero\nrf_psi2_padding=zero\n'
+        printf 'lanes=%s\nchunk=%s\nntt=%s\n' "$CG_RF_LANES" "$CG_RF_CHUNK_SIZE" "$CG_USE_NTT_POLY"
+        printf 'local_threads=%s\nremote_threads=%s\n' "$CG_RF_THREADS_LOCAL" "$CG_RF_THREADS_REMOTE"
+        printf 'psi2_local_threads=%s\npsi2_remote_threads=%s\n' "${CG_RF_THREADS_PSI2_LOCAL:-28}" "${CG_RF_THREADS_PSI2_REMOTE:-32}"
+    } >"$OUT_DIR/run_config.txt"
     # CSV roles:
     #   runs.csv           controller launch time, not paper protocol time
     #   checks.csv         offline correctness checker status
@@ -104,6 +133,8 @@ run_pair() {
     local local_log="$RAW_DIR/${name}_local.log"
     local remote_log="$RAW_DIR/${name}_remote.log"
 
+    local_cmd="set -euo pipefail; ROOT='$LOCAL_ROOT'; source '$LOCAL_ROOT/scripts/run_common.sh'; export $(common_env) CG_RUN_LOG_DIR='$REMOTE_SCRATCH/logs'; cg_run_init lan; $local_cmd"
+    remote_cmd="set -euo pipefail; ROOT='$REMOTE_ROOT'; source '$REMOTE_ROOT/scripts/run_common.sh'; export $(common_env) CG_RUN_LOG_DIR='$REMOTE_SCRATCH/logs'; cg_run_init lan; $remote_cmd"
     echo "==> $name"
     cleanup_ports
     local start end elapsed lr rr
@@ -136,7 +167,12 @@ run_pair() {
 
     end="$(date +%s%3N)"
     elapsed="$(awk "BEGIN { printf \"%.3f\", ($end - $start) / 1000 }")"
-    printf '%s,%s,%s,%s,%s\n' "$name" "$lr" "$rr" "$elapsed" "$local_log,$remote_log" >>"$OUT_DIR/runs.csv"
+    python3 - "$OUT_DIR/runs.csv" "$name" "$lr" "$rr" "$elapsed" "$local_log,$remote_log" <<'PYCSV'
+import csv
+import sys
+with open(sys.argv[1], "a", newline="") as stream:
+    csv.writer(stream).writerow(sys.argv[2:])
+PYCSV
     printf '%s,controller,controller,outer elapsed,%s,elapsed,%s,%s\n' \
         "$name" "$(awk "BEGIN { printf \"%.3f\", $elapsed * 1000 }")" "$local_log" 0 >>"$OUT_DIR/timings.csv"
     python3 "$SCRIPT_ROOT/extract_timings.py" "$name" local "$local_log" "$OUT_DIR/timings.csv"
@@ -290,12 +326,12 @@ check_psi2() {
     local out="$IO_DIR/$name"
     mkdir -p "$out"
     fetch_local "$local_dir/true_intersection.txt" "$out/true_intersection.txt"
-    fetch_remote "$REMOTE_ROOT/logs/psi2_A.log" "$out/psi2_A.log"
-    fetch_local "$LOCAL_ROOT/logs/psi2_B.log" "$out/psi2_B.log"
+    fetch_remote "$REMOTE_SCRATCH/logs/psi2_A.log" "$out/psi2_A.log"
+    fetch_local "$REMOTE_SCRATCH/logs/psi2_B.log" "$out/psi2_B.log"
     # The human-readable party logs print only the first few intersection
     # elements for large sets.  Fetch the complete output files for correctness.
-    fetch_remote "$REMOTE_ROOT/logs/psi2_A_intersection.txt" "$out/psi2_A_intersection.txt"
-    fetch_local "$LOCAL_ROOT/logs/psi2_B_intersection.txt" "$out/psi2_B_intersection.txt"
+    fetch_remote "$REMOTE_SCRATCH/logs/psi2_A_intersection.txt" "$out/psi2_A_intersection.txt"
+    fetch_local "$REMOTE_SCRATCH/logs/psi2_B_intersection.txt" "$out/psi2_B_intersection.txt"
     fetch_protocol_time "$local_dir" "$out" "protocol_time_B.csv" "$name"
     if [[ -n "$remote_dir" ]]; then
         fetch_remote_protocol_time "$remote_dir" "$out" "protocol_time_A.csv" "$name"

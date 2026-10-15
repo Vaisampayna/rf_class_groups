@@ -61,11 +61,12 @@ int main(int argc, char **argv) {
     int fd_sender = connect_tcp(role, sender_host, sender_port);
 
     int fd_rrf = accept_tcp(role, lfd_rrf);
-    close(lfd_rrf);
+    CGNet::close_tcp(lfd_rrf);
     fprintf(stderr, "[S-RF] R-RF connected.\n");
 
     // ── Receive (n_oles, pk') from R-RF ───────────────────────
     uint64_t n_oles    = recv_u64(role, fd_rrf);
+    cg_validate_count(n_oles);
     PublicKey pk_prime = recv_pk(role, fd_rrf, cs);
 
     // Sample ρ from D_q, compute fpk = MaulPK(pk', ρ)
@@ -146,8 +147,8 @@ int main(int argc, char **argv) {
     uint32_t ver = recv_u32(role, fd_rrf);
     send_u32(role, fd_sender, ver);
 
-    close(fd_rrf);
-    close(fd_sender);
+    CGNet::close_tcp(fd_rrf);
+    CGNet::close_tcp(fd_sender);
     fprintf(stderr, "[S-RF] done. verified=%u\n", ver);
     return 0;
 }

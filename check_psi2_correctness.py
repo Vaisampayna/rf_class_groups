@@ -9,30 +9,7 @@ import sys
 from pathlib import Path
 
 
-def read_set(path):
-    return {line.strip() for line in Path(path).read_text().splitlines() if line.strip()}
-
-
-def parse_party_log(path):
-    values = set()
-    in_block = False
-    lines = Path(path).read_text(errors="replace").splitlines()
-    if not any("intersection:" in line for line in lines):
-        return {line.strip() for line in lines if line.strip()}
-    for raw in lines:
-        line = raw.rstrip()
-        if "intersection:" in line:
-            in_block = True
-            continue
-        if in_block and "total intersection size:" in line:
-            break
-        if not in_block:
-            continue
-        item = line.strip()
-        if not item or item == "(empty)" or item.startswith("..."):
-            continue
-        values.add(item)
-    return values
+from psi_check_io import read_set, parse_party_log
 
 
 def check_one(label, expected, got):
@@ -57,9 +34,13 @@ def main():
         )
         return 2
 
-    expected = read_set(sys.argv[1])
-    got_a = parse_party_log(sys.argv[2])
-    got_b = parse_party_log(sys.argv[3])
+    try:
+        expected = read_set(sys.argv[1])
+        got_a = parse_party_log(sys.argv[2])
+        got_b = parse_party_log(sys.argv[3])
+    except (OSError, ValueError) as exc:
+        print(f"[check_psi2] invalid input: {exc}", file=sys.stderr)
+        return 1
     ok_a = check_one("Party A", expected, got_a)
     ok_b = check_one("Party B", expected, got_b)
     return 0 if ok_a and ok_b else 1

@@ -50,8 +50,8 @@ int main(int argc, char **argv) {
         return 1;
     }
     const char *srf_port = argv[1];
-    uint64_t n_oles      = strtoull(argv[2], nullptr, 10);
-    int      repeat      = atoi(argv[3]);
+    uint64_t n_oles      = cg_parse_size(argv[2]);
+    int      repeat      = cg_parse_size(argv[3], "repeat");
 
     RandGen rng;
     seed_randgen(rng);
@@ -69,7 +69,7 @@ int main(int argc, char **argv) {
     int lfd = listen_tcp(role, srf_port);
     fprintf(stderr, "[sender] listening on %s for S-RF…\n", srf_port);
     int fd = accept_tcp(role, lfd);
-    close(lfd);
+    CGNet::close_tcp(lfd);
     fprintf(stderr, "[sender] S-RF connected.\n");
 
     uint64_t n = recv_u64(role, fd);
@@ -80,26 +80,14 @@ int main(int argc, char **argv) {
     }
     PublicKey fpk = recv_pk(role, fd, cs);
 
-    // ── Precompute a_i, b_i values and Enc_fpk(b_i) ──────────
-    // Rationale: fpk is now known; computing all Enc_fpk(b_i) here means the
-    // online loop contains only two nupow + two nucomp calls per OLE, with no
-    // encrypt() calls on the critical path.
-    //
-    // Storage: two flat QFI vectors rather than a vector<CipherText>.
-    // This avoids the CipherText wrapper overhead and keeps the two halves of
-    // each precomputed encryption in contiguous arrays, improving cache
-    // utilisation when they are read sequentially in the online loop.
-
-    // OPT 6: precompute a_i and b_i into plain arrays so the hot loop has
-    // zero sample16 / Mpz construction cost.
+    // Precompute inputs and Enc_fpk(b_i) before processing ciphertexts.
     std::vector<Mpz> a_vals(n_oles), b_vals(n_oles);
     for (uint64_t i = 0; i < n_oles; ++i) {
         a_vals[i] = Mpz((unsigned long)sample16(SEED_A, (uint32_t)i));
         b_vals[i] = Mpz((unsigned long)sample16(SEED_B, (uint32_t)i));
     }
 
-    // OPT 3: store only the two raw QFI components of Enc_fpk(b_i).
-    // OPT 2: pass b_vals[i] directly — no intermediate Mpz copy.
+    // Store ciphertext components in contiguous arrays.
     std::vector<QFI> ub1(n_oles), ub2(n_oles);
     for (uint64_t i = 0; i < n_oles; ++i) {
         ClearText ct_b(cs, b_vals[i]);          // single ClearText per b_i
@@ -109,11 +97,10 @@ int main(int argc, char **argv) {
     }
 
     // ── Online loop ───────────────────────────────────────────
-    // OPT 5: scratch QFIs outside loop — avoids repeated construction.
+    // Reuse scratch forms across iterations.
     QFI t_c1, t_c2, y_c1, y_c2;
 
-    // OPT 4: single timing pair around the whole loop instead of two
-    // clock_gettime syscalls per iteration.
+    // Measure the complete processing loop.
     double wall0  = wall_now_s();
 
     for (uint64_t i = 0; i < n_oles; ++i) {
@@ -136,7 +123,7 @@ int main(int argc, char **argv) {
     double eval_s = wall_s;
 
     uint32_t ver = recv_u32(role, fd);
-    close(fd);
+    CGNet::close_tcp(fd);
 
     printf("role,repeat,n_oles,setup_s,eval_s,wall_s,per_ole_us,verified\n");
     printf("sender,%d,%llu,%.6f,%.6f,%.6f,%.3f,%s\n",
@@ -144,5 +131,5 @@ int main(int argc, char **argv) {
            setup_s, eval_s, wall_s,
            wall_s / (double)n_oles * 1e6,
            ver ? "true" : "false");
-    return 0;
+    return ver == 1 ? 0 : 1;
 }

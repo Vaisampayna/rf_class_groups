@@ -21,8 +21,8 @@ int main(int argc, char **argv) {
     }
     const char *rrf_host = argv[1];
     const char *rrf_port = argv[2];
-    uint64_t n_oles      = strtoull(argv[3], nullptr, 10);
-    int      repeat      = atoi(argv[4]);
+    uint64_t n_oles      = cg_parse_size(argv[3]);
+    int      repeat      = cg_parse_size(argv[4], "repeat");
 
     // ── Setup ──────────────────────────────────────────────────
     RandGen rng;
@@ -43,12 +43,8 @@ int main(int argc, char **argv) {
     PublicKey pk = cg.keygen_pk(sk);
     double keygen_s = wall_now_s() - kg0;
 
-    // ── Precompute all Enc_pk(x_i) ────────────────────────────
-    // pk is known here; x_i values are deterministic. Precomputing before the
-    // connection means the two nupow calls per encryption overlap with TCP
-    // handshake / peer startup latency rather than sitting on the critical path.
-    // Storage: two flat QFI arrays — avoids CipherText wrapper overhead and
-    // gives contiguous access in the send loop.
+    // Encrypt deterministic inputs before connecting; store components in
+    // contiguous arrays for the send loop.
     std::vector<QFI> cx1(n_oles), cx2(n_oles);
     double enc_s = 0.0;
     {
@@ -68,6 +64,7 @@ int main(int argc, char **argv) {
     int fd = connect_tcp(role, rrf_host, rrf_port);
 
     // ── Round 1: send pk and n_oles precomputed ciphertexts ────
+    std::vector<Mpz> results(n_oles);
     double wall0 = wall_now_s();
 
     send_u64(role, fd, n_oles);
@@ -82,6 +79,7 @@ int main(int argc, char **argv) {
 
     // ── Round 2: receive evaluated ciphertexts, decrypt ────────
     double dec_s = 0.0;
+    uint32_t verified = 1;
     for (uint64_t i = 0; i < n_oles; ++i) {
         CipherText cy = recv_ct(role, fd);
 
@@ -89,14 +87,23 @@ int main(int argc, char **argv) {
         ClearText result = cg.decrypt(sk, cy);
         dec_s += wall_now_s() - d0;
 
-        (void)result;   // use result here or in verification
+        results[i] = static_cast<const Mpz&>(result);
     }
 
     double wall_s = wall_now_s() - wall0;
 
-    uint32_t verified = 1;
+    // Offline benchmark verification is excluded from the protocol clock.
+    for (uint64_t i = 0; i < n_oles; ++i) {
+        Mpz expected, a((unsigned long)sample16(0x1234abcdu, (uint32_t)i));
+        Mpz b((unsigned long)sample16(0x87654321u, (uint32_t)i));
+        Mpz x((unsigned long)sample16(SEED_X, (uint32_t)i));
+        Mpz::mul(expected, a, x); Mpz::add(expected, expected, b);
+        Mpz::mod(expected, expected, cs.cleartext_bound());
+        if (results[i] != expected) verified = 0;
+    }
+
     send_u32(role, fd, verified);
-    close(fd);
+    CGNet::close_tcp(fd);
 
     // ── CSV output ────────────────────────────────────────────
     printf("role,repeat,n_oles,setup_s,keygen_s,enc_s,dec_s,wall_s,per_ole_us\n");
@@ -104,5 +111,5 @@ int main(int argc, char **argv) {
            repeat, (unsigned long long)n_oles,
            setup_s, keygen_s, enc_s, dec_s,
            wall_s, wall_s / (double)n_oles * 1e6);
-    return 0;
+    return verified ? 0 : 1;
 }

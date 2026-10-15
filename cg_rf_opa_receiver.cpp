@@ -24,9 +24,9 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    size_t n_pts = (size_t)std::strtoull(argv[1], nullptr, 10);
-    size_t d = (size_t)std::strtoull(argv[2], nullptr, 10);
-    const size_t receiver_coeffs = d + 1;
+    size_t n_pts = (size_t)cg_parse_size(argv[1]);
+    size_t d = (size_t)cg_parse_size(argv[2], "degree", true);
+    const size_t receiver_coeffs = cg_checked_add(d, 1);
 
     std::vector<BICYCL::Mpz> pB_coeffs;
     if (argc > 3 && std::string(argv[3]) == "--bench64") {
@@ -36,7 +36,7 @@ int main(int argc, char** argv) {
         }
         BICYCL::RandGen rng = make_secure_randgen();
         CG_AHE::CG_Scheme cg = make_cg_scheme(rng);
-        uint64_t domain = std::strtoull(argv[4], nullptr, 0);
+        uint64_t domain = cg_parse_u64(argv[4], "argument", 0);
         pB_coeffs = benchmark_input_vector(receiver_coeffs, domain, cg.cs().cleartext_bound());
     } else if (argc > 3 && std::string(argv[3]) == "--input-file") {
         if (argc < 5) {

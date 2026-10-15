@@ -10,6 +10,7 @@
 #include <iostream>
 
 int main(int argc, char** argv) {
+    const size_t reveal_bound = required_env_size("CG_PSI2_REVEAL_BOUND");
     if (argc < 3 || std::string(argv[1]) != "--input-file") {
         std::cerr << "Usage: " << argv[0]
                   << " --input-file intersection_out.txt [--output-file copy.txt]\n";
@@ -33,9 +34,11 @@ int main(int argc, char** argv) {
             BICYCL::Mpz x(token.c_str());
             if (x.sgn() < 0 || x >= cs.cleartext_bound())
                 throw std::runtime_error("psi2_reveal_receiver: input value outside plaintext field");
+            cg_validate_count(intersection.size() + 1);
             intersection.push_back(x);
         }
     }
+    if (!intersection.empty()) validate_psi_set(intersection, cs.cleartext_bound(), "psi2_reveal_receiver");
     std::cerr << "[psi2_reveal_receiver] read " << intersection.size()
               << " intersection value(s) in " << ms_since(t_input) << " ms\n";
 
@@ -46,15 +49,17 @@ int main(int argc, char** argv) {
     int lfd = CGNet::listen_tcp(port_rec);
     std::cerr << "[psi2_reveal_receiver] listening on :" << port_rec
               << " for " << LANES << " reveal lane(s)\n";
-    std::vector<int> fds = accept_rf_lanes(lfd, LANES);
-    close(lfd);
+    std::vector<int> fds = accept_rf_lanes(lfd, LANES, reveal_bound);
+    CGNet::close_tcp(lfd);
 
     CG_AHE::PublicKey pk_double = CGNet::recv_pk(fds[0], cs);
-    const size_t reveal_bound = required_env_size("CG_PSI2_REVEAL_BOUND");
     if (intersection.size() > reveal_bound)
         throw std::runtime_error("psi2_reveal_receiver: intersection larger than CG_PSI2_REVEAL_BOUND");
 
     std::vector<CG_AHE::CipherText> enc_values(reveal_bound);
+    // q cannot be a distinct encrypted padding marker in Z_q. Retain zero
+    // padding, with a known correctness limitation: an unused slot causes
+    // a false zero at Party A when 0 is in A but not in B. See README.md.
     const BICYCL::Mpz zero(0UL);
     pool.parallel_for(0, reveal_bound, [&](size_t i) {
         CG_AHE::CG_Scheme& local_cg = worker_cg();

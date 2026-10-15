@@ -1,291 +1,471 @@
-# Class-Group Reverse-Firewall OLE / OPE / OPA / PSI
+# Class-Group OLE, OPE, OPA, and PSI
 
-This folder is a standalone C++17 demo/benchmark package for reverse-firewalled
-protocols over Class-Group additively homomorphic encryption:
+Research proof-of-concept implementations of batched OLE, 3-round OLE, OPE,
+OPA, and one-way and two-way PSI, together with their reverse-firewall (RF)
+variants. This guide covers installation, local tests, two-machine setup,
+benchmark commands, and result checking.
 
-- RF-OLE: receiver input `x`, sender inputs `a,b`, receiver obtains `a*x+b`.
-- RF-OPA: oblivious polynomial addition built from batched RF-OLE.
-- RF-PSI: private set intersection built from RF-OPA.
+## 1. Get the source and install dependencies
 
-The reported experiments cover exactly these rows: batched OLE, batched RF-OLE,
-3-round OLE, 3-round RF-OLE, OPE, RF-OPE, OPA, RF-OPA, one-way PSI, one-way
-RF-PSI, direct two-way PSI, and RF two-way PSI. The repository contains the
-implementation and scripts for these rows.
+Use Ubuntu/Debian with Bash, a C++17 compiler, CMake, Python 3, GMP, OpenSSL's
+Crypto library, and NTL. For two-machine runs, the controller also needs SSH
+and SCP, and each protocol host needs an SSH server.
 
-The CG-AHE wrapper and BICYCL headers used by the demos are included under
-`third_party/cg_ahe`, making the artifact self-contained apart from system
-libraries.
-
-## Dependencies
-
-Ubuntu/Debian packages:
+On the controller:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y build-essential cmake libgmp-dev libssl-dev libntl-dev
+sudo apt-get install -y build-essential cmake python3 git openssl \
+  libgmp-dev libssl-dev libntl-dev openssh-client
+
+git clone https://github.com/Vaisampayna/rf_class_groups.git
+cd rf_class_groups
 ```
 
-## Build
+If you already have the source, change into that directory instead of cloning
+again. For artifact evaluation, check out the commit or tag given in the
+submission before building or copying the source:
 
 ```bash
-cmake -S . -B build
-cmake --build build -j
+git checkout 'SUBMITTED_COMMIT_OR_TAG'
 ```
 
-The CMake build creates the reported OLE/OPE/OPA/PSI binaries and the local
-correctness helpers used by the scripts.
+Replace `SUBMITTED_COMMIT_OR_TAG` with the actual submitted revision.
+All subsequent controller commands assume the repository is the current directory.
 
-For paper-style timing runs on each protocol host, use a release/native build:
+## 2. Build and check the installation
 
 ```bash
-cmake -S . -B build-2pc \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCG_ENABLE_NATIVE_ARCH=ON \
-  -DCG_ENABLE_LTO=ON \
-  -DCG_USE_NTL_POLY=ON
-cmake --build build-2pc -j
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCG_USE_NTL_POLY=ON
+cmake --build build -j2
+ctest --test-dir build --output-on-failure
 ```
 
-The configure output should say that NTL was found. Without NTL the code still
-builds, but PSI timings will not match the paper configuration.
+`-j2` uses two parallel build jobs. Increase it if the machine has enough memory.
+CMake should report `Using NTL for large PSI polynomial operations:` followed
+by the library path. If NTL is missing, CMake falls back to built-in polynomial
+code; install `libntl-dev` and reconfigure before reproducing benchmark timings.
 
-## Quick Runs
+A successful test run ends with `100% tests passed`. The suite checks parsers,
+protocol outputs, launchers, timing completeness, and the known padding case
+in Section 9. The local suite previously took about 2–3 minutes on the
+validation machine; runtime depends on the host.
 
-Batched RF-OLE:
+## 3. Run local examples
+
+These examples start all required protocol roles on one machine. Run them one
+at a time, from the repository directory:
 
 ```bash
-bash run_rf_cg_batch_ole_local.sh 100
+export CG_BUILD_DIR="$PWD/build"
+export CG_RF_THREADS=2
 ```
 
-OPA:
+`CG_BUILD_DIR` selects the compiled binaries. `CG_RF_THREADS` selects the worker
+threads per protocol process; `2` is suitable for a small functional test.
+
+### RF-PSI with generated sets
 
 ```bash
-bash run_rf_cg_opa_local.sh 1 "1 2 3" "-1 1"
+CG_RF_LANES=4 bash run_rf_cg_psi_local.sh 100 100 20 42
 ```
 
-The RF-OPA local command has the form:
+| Part of the command | Meaning |
+| --- | --- |
+| `CG_RF_LANES=4` | Use four parallel TCP connections between adjacent RF protocol roles. |
+| `bash run_rf_cg_psi_local.sh` | Start the receiver, receiver RF, sender RF, and sender on localhost. |
+| First `100` | Number of elements in Party A's sender set. |
+| Second `100` | Number of elements in Party B's receiver set. |
+| `20` | Number of common elements generated in the two sets. |
+| `42` | Seed for generating the test sets. |
 
-```bash
-bash run_rf_cg_opa_local.sh <d> "<a coefficients>" "<b coefficients>"
-```
+The overlap must be between zero and the smaller set size. The seed controls
+test inputs; it does not fix protocol encryption randomness. The inline
+`CG_RF_LANES=4` setting applies only to this command. To reuse it for subsequent
+commands, run `export CG_RF_LANES=4` instead. Lanes are network connections,
+not worker threads.
 
-Coefficients are written in constant-term-first order. The sender's masking
-polynomial `r` is sampled freshly inside the sender binary; it is not a command
-line input. In the example above:
+The receiver learns the intersection. The script writes the generated inputs,
+intersection, and role logs under `logs/run_<session>/` and runs the checker.
+For this example, successful output includes:
 
 ```text
-d = 1
-a(X) = 1 + 2X + 3X^2      degree <= 2d
-b(X) = -1 + X             degree <= d
-r(X) is sampled internally degree <= d
+SUCCESS: Receiver exactly output the correct intersection of 20 elements!
 ```
 
-The receiver obtains evaluations of:
-
-```text
-a(X) + r(X)b(X)
-```
-
-PSI, with 128-bit plaintext file inputs and an external correctness check:
+The direct PSI equivalent uses the same four positional arguments:
 
 ```bash
-bash run_rf_cg_psi_local.sh 100 100 20 42
+bash run_cg_psi_local.sh 100 100 20 42
 ```
 
-The PSI script generates `inputs/psi/set_A.txt`, `inputs/psi/set_B.txt`, and
-`inputs/psi/true_intersection.txt`, runs the protocol with sender and receiver
-reading their private inputs from those files, writes the receiver output to
-`logs/intersection_out.txt`, then checks it with `check_correctness.py`.
+### PSI with existing files
 
-To use existing files:
+Create a small example from the repository directory:
 
 ```bash
-bash run_rf_cg_psi_local.sh --files set_A.txt set_B.txt true_intersection.txt
+mkdir -p example_inputs
+printf '10\n20\n30\n' > example_inputs/set_A.txt
+printf '20\n30\n40\n' > example_inputs/set_B.txt
+printf '20\n30\n' > example_inputs/expected.txt
+
+CG_RF_LANES=4 bash run_rf_cg_psi_local.sh --files \
+  example_inputs/set_A.txt example_inputs/set_B.txt example_inputs/expected.txt
 ```
 
-The scripts create `build/` if needed and write process logs to `logs/`.
+`--files` takes Party A's set, Party B's set, and the expected intersection,
+in that order. The third file is used only for the offline correctness check.
+Each file contains one unique decimal integer per line. Set elements must be
+in `[0,q-1]`. The example should report a correct intersection of two elements.
+To run direct PSI, replace the script name with `run_cg_psi_local.sh`.
 
-## Two-Machine Protocol Entrypoints
-
-From the controller machine, run one protocol at a time with the `run_2pc_*.sh`
-scripts. Set the two party addresses, users, repository paths, build directory,
-and checker directory through environment variables:
-
-```bash
-export LOCAL_IP=<party-b-ip>
-export REMOTE_IP=<party-a-ip>
-export LOCAL_USER=<party-b-user>
-export REMOTE_USER=<party-a-user>
-export LOCAL_ROOT=<party-b-repo-path>
-export REMOTE_ROOT=<party-a-repo-path>
-export BUILD_DIR=build-2pc
-export CHECKER_DIR="$PWD/build"
-```
+### OLE, OPE, and OPA examples
 
 ```bash
-bash run_2pc_direct_ole.sh 1000
-bash run_2pc_rf_ole.sh 1000
-bash run_2pc_direct_ole3.sh 1000
-bash run_2pc_rf_ole3.sh 1000
-bash run_2pc_direct_ope.sh 1000
-bash run_2pc_rf_ope.sh 1000
-bash run_2pc_direct_opa.sh 1000
-bash run_2pc_rf_opa.sh 1000
-bash run_2pc_direct_psi.sh 1000
-bash run_2pc_direct_psi2.sh 1000
-bash run_2pc_rf_psi.sh 1000
-bash run_2pc_rf_psi2.sh 1000
-```
-
-The argument to these scripts is the paper-table benchmark size `N`. For OLE,
-OPE, and PSI this is direct: it is the number of OLE slots, polynomial degree
-scale, or set size. For OPA, `N` is the number of public OPA evaluation/OLE
-slots. The scripts set `d=floor((N-2)/2)`, choose `deg(a)<=2d`,
-`deg(r)<=d`, and `deg(b)<=d`, so `2d+1 <= N`. For example,
-`bash run_2pc_rf_opa.sh 8192` uses `d=4095`, `deg(a)<=8190`,
-`deg(r),deg(b)<=4095`, and exactly `8192` RF-OLE slots.
-
-For two-way PSI (`run_2pc_direct_psi2.sh` and `run_2pc_rf_psi2.sh`), the first
-phase is the corresponding one-way PSI protocol, where Party B learns the
-intersection. The second phase reveals the same intersection back to Party A.
-The reveal-back phase does not send `intersection.size()` as a separate
-protocol message. Instead, it sends a fixed number of reveal slots, and Party A
-keeps only revealed values that occur in its own input set.
-
-For RF two-way PSI, this fixed reveal count is controlled by
-`CG_PSI2_REVEAL_BOUND`. If unset, the wrapper uses the conservative value
-`N`, so the return path sends `N` encrypted reveal slots:
-
-```bash
-CG_PSI2_REVEAL_BOUND=32768 bash run_2pc_rf_psi2.sh 32768
-```
-
-This is the cleanest setting when no public upper bound on the intersection
-size is assumed, but it is slower than the original variable-size reveal-back.
-For the paper benchmark generator, the overlap is public and defaults to
-`N/5`; in that case a paper-like run can set the public reveal bound to the
-known overlap:
-
-```bash
-OVERLAP=$((32768 / 5))
-CG_PSI2_REVEAL_BOUND=$OVERLAP bash run_2pc_rf_psi2.sh 32768
-```
-
-Use `CG_PSI2_REVEAL_BOUND=N` to audit the full-padding overhead, and use the
-public-overlap value to reproduce timings closer to the reported table. The
-paper sweep wrappers, `benchmark_2pc_paper_all.sh` and
-`run_2pc_rf_psi2_sweep.sh`, use this public-overlap reveal bound by default
-unless `CG_PSI2_REVEAL_BOUND` is already set by the caller.
-
-Common overrides:
-
-```bash
-LOCAL_IP=<party-b-ip> REMOTE_IP=<party-a-ip> CG_RF_LANES=8 bash run_2pc_rf_psi.sh 1000
-```
-
-Sweep scripts are provided for the table-style experiments, including
-`benchmark_2pc_paper_all.sh`, `run_2pc_direct_psi2_sweep.sh`, and
-`run_2pc_rf_psi2_sweep.sh`. The recommended paper reproduction entrypoint is:
-
-```bash
-bash benchmark_2pc_paper_all.sh
-python3 make_reported_total_table.py benchmark_2pc_paper_all_...
-```
-
-All `run_2pc_*.sh` entrypoints use file-backed benchmark inputs. OLE, OPE,
-OPA, one-way PSI, and two-way PSI also run external correctness checks after the
-protocol process exits. Checker outputs are written to each run directory's
-`checks.csv` and `io/<run>/check.log`.
-
-## Parallel Transport
-
-The batched RF-OLE path, RF-OPA, and RF-PSI can use multiple parallel TCP
-connections between each adjacent pair of parties. Set `CG_RF_LANES` before
-running the local scripts:
-
-```bash
-CG_RF_LANES=4 bash run_rf_cg_batch_ole_local.sh 1000
+CG_RF_LANES=4 bash run_rf_cg_batch_ole_local.sh 100
+bash run_cg_ole3_local.sh 100
+CG_RF_LANES=4 bash run_rf_cg_ope_local.sh 10
+bash run_cg_ope_local.sh 10
 CG_RF_LANES=4 bash run_rf_cg_opa_local.sh 1 "1 2 3" "-1 1"
-CG_RF_LANES=4 bash run_rf_cg_psi_local.sh 1000 1000 200 42
+bash run_cg_opa_local.sh 1 "1 2 3" "-1 1"
 ```
 
-The default is one lane, which preserves the original single-connection
-behavior. The same batched RF-OLE helper is used by RF-OPA, and RF-PSI builds on
-that RF-OPA layer.
+The OLE argument is the number of OLE instances. The OPE argument is the
+sender polynomial degree. OPA takes `d`, the coefficients of `a(X)`, and the
+coefficients of `b(X)`. Coefficients are constant-term first, so the OPA example
+uses `d=1`, `a(X)=1+2X+3X^2`, and `b(X)=-1+X`. The sender samples a mask
+`r(X)` internally; the receiver obtains evaluations of `a(X)+r(X)b(X)`.
+The bounds are `deg(a)<=2d`, `deg(b)<=d`, and `deg(r)<=d`.
 
-For non-paper "fast run" experiments, use the fast preset helper. It keeps the
-same protocol code path but uses a larger RF chunk size and disables detailed
-firewall operation profiling:
+## 4. Configure the two-machine setup
+
+There are two protocol hosts and a controller. The controller can also be one
+of the protocol hosts. It launches both sides over SSH and collects results;
+you do not need to start the roles manually in separate terminals.
+
+Use reachable LAN addresses. Replace all six example values below with your
+own accounts and absolute paths. Run this block on the controller and keep
+using the same shell:
 
 ```bash
-bash run_2pc_fast_preset.sh ./run_2pc_rf_opa.sh 8192
+export LOCAL_IP="192.168.1.10"
+export REMOTE_IP="192.168.1.11"
+export LOCAL_USER="receiver"
+export REMOTE_USER="sender"
+export LOCAL_ROOT="/home/receiver/rf_class_groups"
+export REMOTE_ROOT="/home/sender/rf_class_groups"
+export BUILD_DIR="build-2pc"
+export CHECKER_DIR="$PWD/build-portable"
 ```
 
-The paper reproduction driver does not use this helper by default, so published
-configuration and additional optimized experiments remain separate.
+| Variable | Meaning |
+| --- | --- |
+| `LOCAL_IP`, `LOCAL_USER` | Address and login account for Party B, the receiver host. |
+| `REMOTE_IP`, `REMOTE_USER` | Address and login account for Party A, the sender host. |
+| `LOCAL_ROOT` | Repository directory on the receiver host. |
+| `REMOTE_ROOT` | Repository directory on the sender host. |
+| `BUILD_DIR` | Build-directory name inside each host's repository. |
+| `CHECKER_DIR` | Absolute path to the controller's compiled offline checkers. |
 
-## Polynomial Layer
+`LOCAL` refers to the receiver role, even when that host is a separate machine
+from the controller. Use a fresh source directory on each host for the initial
+setup. Both protocol hosts must be able to reach each other's protocol ports.
 
-OPA batch-evaluates the sender and receiver polynomials over the CG-AHE
-plaintext field `Z_q`. For reproducible paper benchmarks, the scripts set
-`CG_FIXED_Q=170141183460469232709364739622490341377`, an NTT-friendly 128-bit
-prime, and `CG_USE_NTT_POLY=1`. PSI/PSI2 then pads the OPA evaluation domain to
-the next power of two with `psi_opa_point_count(...)`, so the NTT path is used
-for the large polynomial interpolation/evaluation layer. NTL is also used for
-large finite-field polynomial operations when `libntl` is available.
+### Set up passwordless SSH from the controller
 
-## Benchmark Size Convention
+First ensure an SSH server is running on each protocol host. Run these commands
+on each host using its terminal:
 
-The paper table columns are labeled by `N = 2^10, ..., 2^15`. The scripts use
-that same convention:
+```bash
+sudo apt-get install -y openssh-server
+sudo systemctl enable --now ssh
+```
 
-- Batched OLE / RF-OLE: `N` OLE instances.
-- 3-round OLE / 3-round RF-OLE: `N` OLE instances.
-- OPE / RF-OPE: degree-scale `N`, implemented with about `N` OLE slots.
-- OPA / RF-OPA: `N` public evaluation/OLE slots. The scripts choose
-  `d=floor((N-2)/2)`, so Party A's additive polynomial has degree at most
-  `2d`, Party A's random mask polynomial has degree at most `d`, and Party B's
-  polynomial has degree at most `d`. Since `2d+1 <= N`, the outputs determine
-  the masked degree-`2d` polynomial; for power-of-two `N`, the public OPA
-  evaluation domain is NTT-friendly.
-- One-way PSI / RF-PSI: both sets have size `N`.
-- Two-way PSI / RF-PSI: both sets have size `N`; the two-way variant is
-  one-way PSI plus a reveal-back phase. Direct two-way PSI sends fixed
-  plaintext reveal slots from Party B to Party A. RF two-way PSI sends fixed
-  encrypted reveal slots through the two reverse firewalls; the firewalls
-  inverse-maul and rerandomize each ciphertext on the return path. The fixed
-  reveal slot count is `CG_PSI2_REVEAL_BOUND`, defaulting to `N` in
-  `run_2pc_rf_psi2.sh`.
+On the controller, create a default SSH key only if one does not already exist:
 
+```bash
+if [ ! -f "$HOME/.ssh/id_ed25519" ]; then
+  ssh-keygen -t ed25519 -f "$HOME/.ssh/id_ed25519" -N ""
+fi
 
-## Main Files
+ssh-copy-id -i "$HOME/.ssh/id_ed25519.pub" "$LOCAL_USER@$LOCAL_IP"
+ssh-copy-id -i "$HOME/.ssh/id_ed25519.pub" "$REMOTE_USER@$REMOTE_IP"
+```
 
-- `cg_batch_ole_receiver.cpp`, `cg_batch_ole_sender.cpp`,
-  `cg_rf_batch_ole_receiver.cpp`, `cg_rf_batch_ole_sender.cpp`: batched OLE and
-  batched RF-OLE.
-- `cg_ole3_receiver.cpp`, `cg_ole3_sender.cpp`, `cg_rf_ole3_receiver.cpp`,
-  `cg_rf_ole3_sender.cpp`: 3-round OLE and 3-round RF-OLE.
-- `cg_ope_receiver.cpp`, `cg_ope_sender.cpp`, `cg_rf_ope_receiver.cpp`,
-  `cg_rf_ope_sender.cpp`: OPE and RF-OPE.
-- `cg_opa_receiver.cpp`, `cg_opa_sender.cpp`, `cg_rf_opa_receiver.cpp`,
-  `cg_rf_opa_sender.cpp`: OPA and RF-OPA.
-- `cg_rf_ole_batch.hpp`: shared batched RF-OLE endpoint helper for OPA/PSI.
-- `cg_rf_opa.hpp`: RF-OPA reduction to batched RF-OLE.
-- `cg_rf_psi_sender.cpp`, `cg_rf_psi_receiver.cpp`: RF-PSI reduction to RF-OPA.
-- `cg_psi_sender.cpp`, `cg_psi_receiver.cpp`: direct one-way PSI.
-- `cg_psi2_sender.cpp`, `cg_psi2_receiver.cpp`: direct two-way PSI, implemented
-  as direct one-way PSI followed by a fixed-slot clear reveal-back. The sender
-  filters received values against its own input set.
-- `cg_rf_psi2_reveal_sender.cpp`, `cg_rf_psi2_reveal_receiver.cpp`,
-  `cg_rf_psi2_reveal_srf.cpp`, `cg_rf_psi2_reveal_rrf.cpp`: RF two-way PSI
-  fixed-slot encrypted reveal-back phase.
-- `generate_sets.py`, `check_correctness.py`: 128-bit plaintext PSI test-data
-  generation and external receiver-output checking.
-- `OPERATION_COMMENTS.md`: role-by-role protocol notes.
+`ssh-copy-id` may request each account's password during this initial setup.
+If an existing key has a passphrase, load it into an SSH agent before testing:
 
-## Notes
+```bash
+eval "$(ssh-agent -s)"
+ssh-add "$HOME/.ssh/id_ed25519"
+```
 
-This is research/demo code. It favors protocol clarity and local benchmarking
-over production hardening. The localhost demo scripts use fixed ports
-`9001`, `9002`, and `9003`; make sure no demo process is still running if a
-script reports a bind/connect failure.
+Verify that both controller connections work without an interactive prompt:
+
+```bash
+ssh -o BatchMode=yes "$LOCAL_USER@$LOCAL_IP" 'hostname'
+ssh -o BatchMode=yes "$REMOTE_USER@$REMOTE_IP" 'hostname'
+```
+
+Both commands must print the remote hostname and exit successfully. The
+benchmark scripts use `BatchMode=yes`; they cannot answer password prompts.
+SSH access is needed from the controller to both hosts; the protocol hosts do
+not need to SSH into each other.
+
+### Install host dependencies and copy the source
+
+From the controller:
+
+```bash
+ssh -t "$LOCAL_USER@$LOCAL_IP" \
+  'sudo apt-get update && sudo apt-get install -y build-essential cmake python3 openssl libgmp-dev libssl-dev libntl-dev'
+ssh -t "$REMOTE_USER@$REMOTE_IP" \
+  'sudo apt-get update && sudo apt-get install -y build-essential cmake python3 openssl libgmp-dev libssl-dev libntl-dev'
+```
+
+These installation commands may ask for a `sudo` password. Benchmark runs do
+not require `sudo`.
+
+Create a source package on the controller and copy the same package to both
+hosts. This excludes local build directories and old experiment results:
+
+```bash
+python3 scripts/package_artifact.py
+scp dist/rf_class_groups_artifact.tar.gz "$LOCAL_USER@$LOCAL_IP:rf_class_groups_artifact.tar.gz"
+scp dist/rf_class_groups_artifact.tar.gz "$REMOTE_USER@$REMOTE_IP:rf_class_groups_artifact.tar.gz"
+
+ssh "$LOCAL_USER@$LOCAL_IP" \
+  "mkdir -p '$LOCAL_ROOT' && tar -xzf ~/rf_class_groups_artifact.tar.gz -C '$LOCAL_ROOT' --strip-components=1"
+ssh "$REMOTE_USER@$REMOTE_IP" \
+  "mkdir -p '$REMOTE_ROOT' && tar -xzf ~/rf_class_groups_artifact.tar.gz -C '$REMOTE_ROOT' --strip-components=1"
+```
+
+If the controller is a protocol host, choose a separate destination directory
+for this extracted copy so that it does not overwrite the controller checkout.
+
+## 5. Build on both hosts and on the controller
+
+Build directly on each protocol host, since native CPU tuning can differ
+between machines:
+
+```bash
+ssh "$LOCAL_USER@$LOCAL_IP" \
+  "cd '$LOCAL_ROOT' && cmake -S . -B '$BUILD_DIR' -DCMAKE_BUILD_TYPE=Release -DCG_ENABLE_NATIVE_ARCH=ON -DCG_ENABLE_LTO=ON -DCG_USE_NTL_POLY=ON && cmake --build '$BUILD_DIR' -j2"
+
+ssh "$REMOTE_USER@$REMOTE_IP" \
+  "cd '$REMOTE_ROOT' && cmake -S . -B '$BUILD_DIR' -DCMAKE_BUILD_TYPE=Release -DCG_ENABLE_NATIVE_ARCH=ON -DCG_ENABLE_LTO=ON -DCG_USE_NTL_POLY=ON && cmake --build '$BUILD_DIR' -j2"
+
+cmake -S . -B "$CHECKER_DIR" -DCMAKE_BUILD_TYPE=Release \
+  -DCG_ENABLE_NATIVE_ARCH=OFF -DCG_ENABLE_LTO=ON -DCG_USE_NTL_POLY=ON
+cmake --build "$CHECKER_DIR" -j2
+```
+
+Check the configure output on both protocol hosts for the NTL library message
+shown in Section 2. `CG_ENABLE_NATIVE_ARCH=ON` enables CPU-specific instructions;
+build separately on each machine rather than copying compiled binaries.
+`CG_ENABLE_LTO=ON` enables link-time optimization when supported.
+
+## 6. Select benchmark settings and run a smoke test
+
+On the controller, in the same shell as the machine settings:
+
+```bash
+export CG_Q_NBITS=128 CG_K=1
+export CG_FIXED_Q=170141183460469232709364739622490341377
+export CG_USE_NTT_POLY=1
+export CG_BENCH_INPUT_BITS=128 CG_PSI_INPUT_BITS=128 CG_INPUT_FILE_BITS=128
+export CG_RF_LANES=8 CG_RF_CHUNK_SIZE=128
+export CG_RF_THREADS_LOCAL=28 CG_RF_THREADS_REMOTE=32
+export CG_RF_THREADS_PSI2_LOCAL=28 CG_RF_THREADS_PSI2_REMOTE=32
+export CG_VALIDATE_LANES=0 CG_SKIP_CHECKS=0
+export CG_IO_TIMEOUT_S=180 CG_CONNECT_RETRIES=7200 TIMEOUT_S=7200
+unset OUT_DIR OVERLAP CG_PSI2_REVEAL_BOUND
+```
+
+| Setting | Meaning |
+| --- | --- |
+| `CG_Q_NBITS`, `CG_K`, `CG_FIXED_Q` | Plaintext and class-group scheme parameters. |
+| `CG_USE_NTT_POLY=1` | Enable the NTT polynomial path for supported parameters. |
+| `CG_BENCH_INPUT_BITS`, `CG_PSI_INPUT_BITS`, `CG_INPUT_FILE_BITS` | Bit bounds for generated benchmark inputs; PSI elements are also bounded by `q`. |
+| `CG_RF_LANES=8` | Parallel TCP lanes per adjacent connection in the RF pipeline. |
+| `CG_RF_CHUNK_SIZE=128` | Ciphertexts processed per transport chunk. |
+| `CG_RF_THREADS_LOCAL`, `CG_RF_THREADS_REMOTE` | Worker threads per protocol process on the receiver and sender hosts. |
+| `CG_RF_THREADS_PSI2_LOCAL`, `CG_RF_THREADS_PSI2_REMOTE` | Separate per-process thread counts for RF two-way PSI. |
+| `CG_VALIDATE_LANES=0` | Use the default lane framing for timing reproduction. |
+| `CG_SKIP_CHECKS=0` | Run the offline correctness checkers. |
+| `CG_IO_TIMEOUT_S` | Socket I/O timeout, in seconds. |
+| `CG_CONNECT_RETRIES` | Number of connection attempts, spaced about 0.2 seconds apart. |
+| `TIMEOUT_S` | Controller timeout for an individual protocol run, in seconds. |
+
+The thread counts above are the documented benchmark configuration. Reduce them
+for a small smoke test on machines with fewer CPU cores; record any changes
+when comparing timings. Multiple RF processes can run concurrently on a host.
+The local-only `CG_RF_THREADS=2` from Section 3 is replaced by the controller's
+per-host thread settings in these runs.
+
+Start with small experiments:
+
+```bash
+CG_RF_THREADS_LOCAL=2 CG_RF_THREADS_REMOTE=2 bash run_2pc_direct_ole.sh 16
+CG_RF_THREADS_LOCAL=2 CG_RF_THREADS_REMOTE=2 bash run_2pc_rf_psi.sh 16
+```
+
+`16` is the number of OLE instances in the first command and the size of each
+PSI set in the second. The PSI default overlap is `floor(16/5)=3`. Each command
+prints its output-directory path. Verify that `checks.csv` contains checker
+status `0` and that both `local_rc` and `remote_rc` in `runs.csv` are `0`.
+The scripts generate test inputs and run both hosts automatically.
+
+## 7. Run individual protocols or the complete sweep
+
+Each command below runs one protocol with benchmark size `N=1024`:
+
+```bash
+bash run_2pc_direct_ole.sh 1024
+bash run_2pc_rf_ole.sh 1024
+bash run_2pc_direct_ole3.sh 1024
+bash run_2pc_rf_ole3.sh 1024
+bash run_2pc_direct_ope.sh 1024
+bash run_2pc_rf_ope.sh 1024
+bash run_2pc_direct_opa.sh 1024
+bash run_2pc_rf_opa.sh 1024
+bash run_2pc_direct_psi.sh 1024
+bash run_2pc_rf_psi.sh 1024
+bash run_2pc_direct_psi2.sh 1024
+bash run_2pc_rf_psi2.sh 1024
+```
+
+| Protocol | Meaning of `N` |
+| --- | --- |
+| Batched OLE and 3-round OLE | Number of OLE instances. |
+| OPE | Sender polynomial degree; the reduction uses `N` OLE instances. |
+| OPA | Number of public evaluation/OLE slots; `d=floor((N-2)/2)`. |
+| One-way and two-way PSI | Number of elements in each party's set. |
+
+PSI benchmark scripts generate overlap `floor(N/5)` by default. To choose a
+different overlap and repeatable input-generation seed for an individual run:
+
+```bash
+OVERLAP=200 SEED=42 bash run_2pc_rf_psi.sh 1024
+```
+
+This generates two 1024-element sets with exactly 200 common elements.
+
+Run all twelve variants for the smallest paper-table column:
+
+```bash
+bash benchmark_2pc_paper_all.sh 1024
+```
+
+Run the full six-column sweep:
+
+```bash
+export OUT_DIR="$PWD/benchmark_2pc_paper_all_$(date +%Y%m%d_%H%M%S)"
+bash benchmark_2pc_paper_all.sh 1024 2048 4096 8192 16384 32768
+python3 make_reported_total_table.py "$OUT_DIR" | tee "$OUT_DIR/reproduced_table.txt"
+```
+
+The positional arguments to the sweep are the benchmark sizes to run. With no
+arguments, it uses the same six sizes. Choose a fresh `OUT_DIR` for each sweep;
+`unset OUT_DIR` before returning to individual protocol commands so they create
+their own directories. A full sweep can take hours, depending on the hardware.
+
+RF two-way PSI uses a fixed reveal-slot count. An individual
+`run_2pc_rf_psi2.sh N` run defaults to `N` slots. The full paper sweep uses the
+public generated overlap as its reveal bound. To measure the conservative
+`N`-slot setting explicitly for one size:
+
+```bash
+unset OUT_DIR
+CG_PSI2_REVEAL_BOUND=1024 bash run_2pc_rf_psi2.sh 1024
+```
+
+Record the reveal bound with the results; different bounds change the amount
+of protocol work.
+
+## 8. Read and verify the results
+
+| Output | Contents |
+| --- | --- |
+| `raw/` | Logs collected from both protocol hosts. |
+| `io/` | Input/output files fetched for offline checks. |
+| `runs.csv` | Process exit statuses and controller wall-clock times. |
+| `protocol_times.csv` | Protocol times measured by each party, in milliseconds. |
+| `timings.csv` | Detailed phase timings for individual runs. |
+| `checks.csv` | Offline checker exit statuses and checker-log paths. |
+| `run_config.txt` | Settings recorded for each individual protocol run. |
+
+For an individual run, set `RUN_DIR` to the directory printed by its launcher:
+
+```bash
+export RUN_DIR="/absolute/path/printed/by/the/launcher"
+cat "$RUN_DIR/runs.csv"
+cat "$RUN_DIR/checks.csv"
+cat "$RUN_DIR/protocol_times.csv"
+```
+
+Successful process and checker statuses are `0`. With `CG_SKIP_CHECKS=0`, a
+`skipped` checker record is not an expected successful check. Sweep results
+contain combined CSV files and a subdirectory for each protocol/size pair.
+
+The reported protocol time is the maximum of the two party times. Input
+generation, file loading, offline checker dumps, correctness checks, and
+controller SSH overhead are excluded from this timer. Controller wall-clock
+time is kept separately in `runs.csv`. The table generator reports seconds;
+incomplete or failed measurements appear as `--`.
+
+Compare the generated table with the paper only after matching the build,
+hardware, input sizes, threads, lanes, chunk size, and reveal bound. The local
+tests do not establish agreement with the published timing table.
+
+## 9. Known two-way PSI padding limitation
+
+Direct and RF two-way PSI pad unused reveal slots with `0`. If Party A contains
+`0`, Party B does not, and a reveal slot is unused, Party A incorrectly includes
+`0` in its output. For example, `A={0,1}`, `B={1,2}`, and two reveal slots give
+Party A `{0,1}` instead of `{1}`. Party B's output is unaffected.
+
+Exclude `0` from Party A's input to avoid this padding collision. A test that
+reproduces this known fault is part of the automated suite; passing that test
+means the documented behavior was observed, not that this fault was corrected.
+
+## 10. Troubleshooting
+
+- **SSH requests a password or reports permission denied:** repeat the two
+  `BatchMode=yes` hostname checks in Section 4 and load an existing key into
+  `ssh-agent` if it has a passphrase.
+- **A binary is missing:** rebuild the source on the affected host and check
+  `LOCAL_ROOT`, `REMOTE_ROOT`, `BUILD_DIR`, and `CHECKER_DIR`.
+- **NTL is not found:** install `libntl-dev` on that host and rerun CMake.
+- **Bind failure or a busy run lock:** inspect listeners with `ss -ltnp` and
+  stop only your interrupted run, or wait for the current run to finish.
+  Run the examples sequentially; they share default ports.
+- **Connection timeout:** check host addresses, firewall rules, reachability of
+  the configured protocol ports, and the role logs under `raw/`.
+- **Checker failure or `--` timing:** inspect `checks.csv`, `runs.csv`, and the
+  matching logs before treating the measurement as complete.
+
+Press `Ctrl-C` in the controller terminal to stop a run. Launcher traps clean
+up their own child processes. More manual role examples are in
+[RUN_2PC_SETUP.md](RUN_2PC_SETUP.md).
+
+## Source organization
+
+- `cg_*.cpp`: protocol endpoints, reverse firewalls, and C++ checkers.
+- `cg_*.hpp`: shared arithmetic, polynomial, networking, and timing helpers.
+- `third_party/cg_ahe/`: CG-AHE wrapper and vendored BICYCL code.
+- `run_*.sh`: localhost and two-machine launchers.
+- `benchmark_2pc_paper_all.sh`: twelve-protocol, six-size benchmark driver.
+- `generate_sets.py`, `generate_protocol_inputs.py`: test-input generators.
+- `check_correctness.py`, `check_psi2_correctness.py`: PSI output checkers.
+- `extract_timings.py`, `make_reported_total_table.py`: timing extraction and reporting.
+- `scripts/`: shared launcher helpers and source packaging.
+- `review/regression.*`, `review/check_direct_padding.py`: automated tests.
+
+See [OPERATION_COMMENTS.md](OPERATION_COMMENTS.md) for the protocol-to-source
+map, [RUN_TESTS.md](RUN_TESTS.md) for further local examples, and
+[VALIDATION.md](VALIDATION.md) for completed validation.
+
+## License
+
+GPL-3.0-or-later. Vendored BICYCL code retains its original license notices.

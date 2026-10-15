@@ -3,7 +3,7 @@
  * Direct two-way PSI receiver.
  *
  * Party B runs the normal one-way direct PSI receiver, learns the intersection,
- * then sends that intersection directly back to Party A in the clear.
+ * then sends fixed reveal slots directly back to Party A in the clear.
  */
 
 #include <cstdlib>
@@ -23,7 +23,7 @@ int main(int argc, char** argv)
     CG_AHE::CG_Scheme cg = make_cg_scheme(rng);
     const BICYCL::Mpz& q = cg.cs().cleartext_bound();
 
-    size_t m_A = std::strtoull(argv[2], nullptr, 10);
+    size_t m_A = cg_parse_size(argv[2]);
     std::vector<BICYCL::Mpz> set_B;
     const char* port = ope_port_rec();
     const char* reveal_port = env_or_default("CG_PSI2_DIRECT_REVEAL_PORT", "9143");
@@ -51,10 +51,10 @@ int main(int argc, char** argv)
         set_B = read_mpz_list_file(argv[4], q, "psi2_receiver");
         std::cerr << "[psi2_receiver] Read S_B from " << argv[4] << "\n";
     } else if (std::string(argv[3]) == "--random") {
-        size_t m_B = (argc > 4) ? std::strtoull(argv[4], nullptr, 10) : 1000;
-        uint64_t seed = (argc > 5 && std::string(argv[5]) != "--port"
-                         && std::string(argv[5]) != "--reveal-port")
-            ? std::strtoull(argv[5], nullptr, 10) : 99;
+        size_t m_B = (argc > 4) ? cg_parse_size(argv[4]) : 1000;
+        uint64_t seed = (argc > 5 && std::string(argv[5]).rfind("--", 0) != 0
+                         )
+            ? cg_parse_u64(argv[5], "argument", 10) : 42;
         std::vector<BICYCL::Mpz> ignored_A;
         make_random_psi_sets_full_field(m_A, m_B, seed, q, ignored_A, set_B);
         std::cerr << "[psi2_receiver] Generated random S_B of size " << m_B
@@ -71,13 +71,14 @@ int main(int argc, char** argv)
             set_B.emplace_back(arg.c_str());
         }
     }
+    validate_psi_set(set_B, q, "cg_psi2_receiver");
     std::cerr << "[psi2_receiver] benchmark set input sampling excluded from protocol time: "
               << ms_since(t_input) << " ms\n";
 
     auto t_protocol = Clock::now();
     auto t_poly = Clock::now();
     size_t m_B = set_B.size();
-    size_t n_pts = psi_opa_point_count(m_A + m_B + 1, q);
+    size_t n_pts = psi_opa_point_count(cg_checked_add(cg_checked_add(m_A, m_B), 1), q);
     std::cerr << "[psi2_receiver] direct two-way PSI |S_A|=" << m_A
               << ", |S_B|=" << m_B << ", n_pts=" << n_pts << "\n";
 
@@ -108,12 +109,14 @@ int main(int argc, char** argv)
     const size_t reveal_bound = std::min(m_A, m_B);
     if (intersection.size() > reveal_bound)
         throw std::runtime_error("psi2_receiver: intersection larger than public reveal bound");
-    const BICYCL::Mpz dummy_zero(0UL);
+    // Match RF two-way PSI: retain zero in unused reveal slots. If 0 belongs
+    // to A but not B, an unused slot causes a false zero in A's output.
+    const BICYCL::Mpz padding_value(0UL);
     for (size_t i = 0; i < reveal_bound; ++i) {
         const bool real = i < intersection.size();
-        CGNet::send_mpz(fd, real ? intersection[i] : dummy_zero);
+        CGNet::send_mpz(fd, real ? intersection[i] : padding_value);
     }
-    close(fd);
+    CGNet::close_tcp(fd);
     std::cerr << "[psi2_receiver] clear reveal-back send done in "
               << ms_since(t_reveal) << " ms using " << reveal_bound
               << " fixed reveal slot(s)\n";

@@ -27,7 +27,7 @@ if(CG_ENABLE_LTO)
 endif()
 
 # ── Dependencies ───────────────────────────────────────────────
-find_package(OpenSSL REQUIRED)
+find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 find_package(OpenMP REQUIRED)
 find_library(GMP_LIB    gmp    REQUIRED)
 find_library(GMPXX_LIB  gmpxx  REQUIRED)
@@ -115,3 +115,22 @@ cg_binary(cg_check_batch_ole           cg_check_batch_ole.cpp)
 cg_binary(cg_check_ope                 cg_check_ope.cpp)
 cg_binary(cg_check_opa                 cg_check_opa.cpp)
 cg_binary(cg_print_q                   cg_print_q.cpp)
+
+include(CTest)
+if(BUILD_TESTING)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    cg_binary(cg_regression review/regression.cpp)
+    # Assertions must remain active when the artifact is built in Release mode.
+    target_compile_options(cg_regression PRIVATE -UNDEBUG)
+    add_test(NAME cg_regressions
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/review/regression.py
+            --cpp-bin $<TARGET_FILE:cg_regression>
+            --build-dir ${CMAKE_CURRENT_BINARY_DIR})
+    set_tests_properties(cg_regressions PROPERTIES TIMEOUT 240
+        ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+    add_test(NAME cg_direct_padding
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/review/check_direct_padding.py
+            ${CMAKE_CURRENT_BINARY_DIR})
+    set_tests_properties(cg_direct_padding PROPERTIES TIMEOUT 120
+        ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+endif()

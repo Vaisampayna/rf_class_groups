@@ -6,10 +6,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+source "$ROOT/scripts/run_common.sh"
+cg_run_init lan
 BUILD_DIR="${CG_BUILD_DIR:-$ROOT/build}"
 if [[ ! -x "$BUILD_DIR/cg_rf_ope_sender" ]]; then
     "$ROOT/build_local.sh"
 fi
+CALLER_DIR="$PWD"
 cd "$BUILD_DIR"
 
 SYSTEM_B_IP="${1:-127.0.0.1}"
@@ -22,17 +25,16 @@ DEFAULT_THREADS=$(( ($(nproc) + 1) / 2 ))
 if (( DEFAULT_THREADS < 1 )); then DEFAULT_THREADS=1; fi
 export CG_RF_THREADS="${CG_RF_THREADS:-$DEFAULT_THREADS}"
 
-LOG_DIR="$ROOT/logs/ope_sender"
+LOG_DIR="$CG_RUN_LOG_DIR/ope_sender"
 mkdir -p "$LOG_DIR"
 rm -f "$LOG_DIR"/ope_sender.log "$LOG_DIR"/ope_rf_sender.log
 
 cleanup_children() {
     jobs -pr | xargs -r kill 2>/dev/null || true
 }
-trap cleanup_children EXIT
+trap cg_cleanup_children EXIT
 
 if [[ "${CG_SKIP_PORT_CLEANUP:-0}" != "1" ]]; then
-    fuser -k "9001/tcp" 2>/dev/null || true
     sleep 1
 fi
 
@@ -68,7 +70,7 @@ wait_or_report() {
     local label="$2"
     local file="$3"
     set +e
-    wait "$pid"
+    cg_wait_child "$pid"
     local status=$?
     set -e
     if (( status != 0 )); then
@@ -91,8 +93,7 @@ wait_for_log "$LOG_DIR/ope_rf_sender.log" "listening on :9001" "$PID_RFS" "sende
 ./cg_rf_ope_sender "$SYSTEM_B_IP" "$DEGREE" "$@" >"$LOG_DIR/ope_sender.log" 2>&1 &
 PID_S=$!
 
-wait_or_report "$PID_RFS" "sender firewall" "$LOG_DIR/ope_rf_sender.log"
-wait_or_report "$PID_S" "RF-OPE sender" "$LOG_DIR/ope_sender.log"
+cg_wait_all "$PID_RFS" "$PID_S"
 
 echo "=== RF-OPE Sender Results ==="
 cat "$LOG_DIR/ope_sender.log"

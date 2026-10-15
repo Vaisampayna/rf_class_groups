@@ -24,6 +24,7 @@
 #include <unordered_set>
 #include "cg_ahe/cg_ahe.hpp"
 #include "cg_network.hpp"
+#include "cg_config.hpp"
 #include "cg_thread_pool.hpp"
 
 #if defined(CG_USE_NTL_POLY)
@@ -38,11 +39,7 @@
 //   CG_K=1          is the CL_HSMqk parameter used by the current scheme.
 inline size_t cg_env_size(const char* name, size_t fallback)
 {
-    const char* env = std::getenv(name);
-    if (!env || !*env) return fallback;
-    char* end = nullptr;
-    unsigned long v = std::strtoul(env, &end, 10);
-    return (end == env || v == 0) ? fallback : (size_t)v;
+    return cg_config_size(name, fallback, 4096);
 }
 
 static const size_t        CG_Q_NBITS   = cg_env_size("CG_Q_NBITS", 256);
@@ -126,9 +123,7 @@ inline uint64_t cg_public_seed()
 {
     const char* env = std::getenv("CG_PUBLIC_SEED");
     if (!env || !*env) return 0x43475f5055424c49ULL;
-    char* end = nullptr;
-    unsigned long long v = std::strtoull(env, &end, 10);
-    return (end == env) ? 0x43475f5055424c49ULL : (uint64_t)v;
+    return cg_parse_u64(env, "CG_PUBLIC_SEED");
 }
 
 inline BICYCL::RandGen make_public_param_randgen()
@@ -190,6 +185,20 @@ inline BICYCL::Mpz benchmark_input_bound(const BICYCL::Mpz& q)
     return bound;
 }
 
+inline void validate_psi_set(const std::vector<BICYCL::Mpz>& values,
+                             const BICYCL::Mpz& q, const char* role) {
+    cg_validate_count(values.size());
+    std::unordered_set<std::string> seen;
+    for (const auto& x : values) {
+        if (x.sgn() < 0 || x >= q)
+            throw std::runtime_error(std::string(role) + ": PSI element outside Z_q");
+        std::ostringstream text;
+        text << x;
+        if (!seen.insert(text.str()).second)
+            throw std::runtime_error(std::string(role) + ": duplicate PSI element " + text.str());
+    }
+}
+
 inline std::vector<BICYCL::Mpz> read_mpz_list_file(
     const std::string& path,
     const BICYCL::Mpz& q,
@@ -211,10 +220,12 @@ inline std::vector<BICYCL::Mpz> read_mpz_list_file(
                 << path << ": " << token;
             throw std::runtime_error(oss.str());
         }
+        cg_validate_count(values.size() + 1);
         values.push_back(x);
     }
     if (values.empty())
         throw std::runtime_error(std::string(role) + ": input file is empty: " + path);
+    validate_psi_set(values, q, role);
     return values;
 }
 
@@ -239,6 +250,7 @@ inline std::vector<BICYCL::Mpz> read_mpz_list_file_mod_q(
             throw std::runtime_error(oss.str());
         }
         BICYCL::Mpz::mod(x, x, q);
+        cg_validate_count(values.size() + 1);
         values.push_back(x);
     }
     if (values.empty())
@@ -261,13 +273,9 @@ inline std::vector<BICYCL::Mpz> read_mpz_coeff_file(
     std::string token;
     while (in >> token) {
         BICYCL::Mpz x(token.c_str());
-        if (x.sgn() < 0) {
-            std::ostringstream oss;
-            oss << role << ": negative coefficient in "
-                << path << ": " << token;
-            throw std::runtime_error(oss.str());
-        }
+
         BICYCL::Mpz::mod(x, x, q);
+        cg_validate_count(values.size() + 1);
         values.push_back(x);
     }
     if (values.empty())
@@ -327,14 +335,7 @@ inline bool cg_profile_ops_enabled()
 
 inline size_t required_env_size(const char* name)
 {
-    const char* env = std::getenv(name);
-    if (!env || !*env)
-        throw std::runtime_error(std::string("missing required environment variable ") + name);
-    char* end = nullptr;
-    unsigned long long value = std::strtoull(env, &end, 10);
-    if (end == env || *end != '\0' || value == 0)
-        throw std::runtime_error(std::string("invalid positive integer in environment variable ") + name);
-    return (size_t)value;
+    return cg_parse_size(std::getenv(name), name);
 }
 
 inline std::vector<BICYCL::Mpz> benchmark_input_vector(
@@ -701,9 +702,7 @@ inline size_t ntt_poly_threshold()
 {
     const char* env = std::getenv("CG_NTT_POLY_THRESHOLD");
     if (!env || !*env) return 512;
-    char* end = nullptr;
-    unsigned long v = std::strtoul(env, &end, 10);
-    return (end == env) ? 512 : (size_t)v;
+    return cg_parse_size(env, "polynomial threshold", true);
 }
 
 inline std::vector<BICYCL::Mpz> poly_slice(
@@ -825,9 +824,7 @@ inline size_t ntl_poly_threshold()
     // BICYCL<->NTL conversion cost.  Set CG_NTL_POLY_THRESHOLD=0 to force it.
     const char* env = std::getenv("CG_NTL_POLY_THRESHOLD");
     if (!env || !*env) return 512;
-    char* end = nullptr;
-    unsigned long v = std::strtoul(env, &end, 10);
-    return (end == env) ? 512 : (size_t)v;
+    return cg_parse_size(env, "polynomial threshold", true);
 }
 
 inline bool ntl_poly_enabled()
@@ -998,8 +995,8 @@ inline const std::vector<BICYCL::Mpz>& public_eval_points_cached(
     const BICYCL::Mpz& q)
 {
     // Public OPA/PSI points use an NTT roots-of-unity domain when the fixed
-    // 128-bit NTT prime and a power-of-two point count are active.  Otherwise
-    // they fall back to alpha_i=i+1 for legacy OPA sizes.
+    // 128-bit NTT prime and a power-of-two point count are active. Otherwise
+    // they fall back to alpha_i=i+1 for point counts outside that domain.
     static std::mutex cache_mu;
     static std::unordered_map<std::string, std::vector<BICYCL::Mpz>> cache;
 
@@ -1081,6 +1078,7 @@ inline BICYCL::Mpz poly_eval(
     // Horner form evaluates from the highest coefficient downward:
     // (((c_d*x + c_{d-1})*x + ...) + c_0) mod q.
     BICYCL::Mpz res = coeffs.back();
+    BICYCL::Mpz::mod(res, res, q);
     for (int i = (int)coeffs.size()-2; i >= 0; --i) {
         BICYCL::Mpz::mul(res, res, x);
         BICYCL::Mpz::add(res, res, coeffs[i]);
@@ -1263,10 +1261,7 @@ inline size_t poly_eval_auto_horner_max_points()
     // the default on the empirically better path unless callers override it.
     const char* env = std::getenv("CG_POLY_HORNER_MAX_POINTS");
     if (!env || !*env) return 65536;
-    char* end = nullptr;
-    unsigned long v = std::strtoul(env, &end, 10);
-    if (end == env) return 65536;
-    return (size_t)v;
+    return cg_parse_size(env, "CG_POLY_HORNER_MAX_POINTS", true);
 }
 
 inline std::string poly_eval_method_env()
@@ -1331,8 +1326,12 @@ inline std::vector<BICYCL::Mpz> rf_opa_eval_points(size_t n_pts)
 
 inline size_t psi_opa_point_count(size_t degree_bound_plus_one, const BICYCL::Mpz& q)
 {
-    if (ntt_runtime_enabled() && is_ntt128_prime(q))
-        return next_power_of_two_size(degree_bound_plus_one);
+    cg_validate_count(degree_bound_plus_one);
+    if (ntt_runtime_enabled() && is_ntt128_prime(q)) {
+        size_t count = next_power_of_two_size(degree_bound_plus_one);
+        cg_validate_count(count);
+        return count;
+    }
     return degree_bound_plus_one;
 }
 
@@ -1549,9 +1548,7 @@ inline size_t psi_lagrange_to_coeff_threshold()
     // use batch polynomial evaluation instead of direct barycentric evaluation.
     const char* env = std::getenv("CG_PSI_INTERP_TO_COEFF_THRESHOLD");
     if (!env || !*env) return 4096;
-    char* end = nullptr;
-    unsigned long v = std::strtoul(env, &end, 10);
-    return (end == env) ? 4096 : (size_t)v;
+    return cg_parse_size(env, "polynomial threshold", true);
 }
 
 inline std::vector<BICYCL::Mpz> lagrange_eval_batch_auto(
@@ -1620,16 +1617,28 @@ inline void sample_unique_field_elements(
 {
     // Sample nonzero unique benchmark set elements, honoring the configured
     // input-size bound.  "seen" is string-based to make Mpz hashing unnecessary.
-    out.reserve(out.size() + count);
+    cg_validate_count(cg_checked_add(out.size(), count), true);
     BICYCL::Mpz bound = benchmark_input_bound(q);
+    BICYCL::Mpz requested((unsigned long)cg_checked_add(seen.size(), count));
+    BICYCL::Mpz capacity;
+    BICYCL::Mpz::sub(capacity, bound, BICYCL::Mpz(1UL));
+    if (requested > capacity)
+        throw std::runtime_error("PSI sampling domain has too few nonzero unused elements");
+    out.reserve(out.size() + count);
+    size_t rejected = 0;
+    BICYCL::Mpz scan(1UL);
     while (count > 0) {
-        BICYCL::Mpz x = rng.random_mpz(bound);
+        BICYCL::Mpz x;
+        if (rejected < 64) x = rng.random_mpz(bound);
+        else { x = scan; BICYCL::Mpz::add(scan, scan, 1UL); }
+        ++rejected;
         if (x == BICYCL::Mpz(0UL)) continue;
         std::ostringstream oss;
         oss << x;
         if (seen.insert(oss.str()).second) {
             out.push_back(x);
             --count;
+            rejected = 0;
         }
     }
 }
@@ -1645,6 +1654,14 @@ inline void make_random_psi_sets_full_field(
     // Deterministically generate two benchmark PSI sets with 20% overlap.  This
     // is for local/simulation paths; two-machine scripts normally generate and
     // pass explicit input files.
+    cg_validate_count(mA); cg_validate_count(mB);
+    if (!setA.empty() || !setB.empty())
+        throw std::runtime_error("PSI random output sets must initially be empty");
+    const auto union_size = cg_checked_add(mA, mB) - std::min(mA, mB) / 5;
+    BICYCL::Mpz capacity = benchmark_input_bound(q);
+    BICYCL::Mpz::sub(capacity, capacity, BICYCL::Mpz(1UL));
+    if (BICYCL::Mpz((unsigned long)union_size) > capacity)
+        throw std::runtime_error("PSI union exceeds nonzero sampling domain");
     BICYCL::RandGen shared_rng = make_seeded_benchmark_randgen(seed, 0x5053495f53484152ULL);
     BICYCL::RandGen rngA = make_seeded_benchmark_randgen(seed, 0x5053495f415f5f5fULL);
     BICYCL::RandGen rngB = make_seeded_benchmark_randgen(seed, 0x5053495f425f5f5fULL);
@@ -1662,6 +1679,6 @@ inline void make_random_psi_sets_full_field(
         setB.push_back(x);
     }
 
-    sample_unique_field_elements(mA - overlap, q, rngA, setA, seenA);
-    sample_unique_field_elements(mB - overlap, q, rngB, setB, seenB);
+    sample_unique_field_elements(mA - overlap, q, rngA, setA, seenAll);
+    sample_unique_field_elements(mB - overlap, q, rngB, setB, seenAll);
 }

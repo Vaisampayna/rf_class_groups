@@ -33,6 +33,7 @@ int main(int argc, char** argv)
         return 2;
     }
 
+    cg_validate_count(n_coeffs);
     BICYCL::Mpz q_sender = read_mpz_text(sin);
     BICYCL::Mpz q_receiver = read_mpz_text(rin);
     BICYCL::Mpz alpha = read_mpz_text(rin);

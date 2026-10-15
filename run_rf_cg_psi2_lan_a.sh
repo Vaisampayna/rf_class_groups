@@ -12,10 +12,13 @@
 
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+source "$ROOT/scripts/run_common.sh"
+cg_run_init lan
 BUILD_DIR="${CG_BUILD_DIR:-$ROOT/build}"
 if [[ ! -x "$BUILD_DIR/cg_rf_psi_sender" || ! -x "$BUILD_DIR/cg_rf_psi2_reveal_sender" ]]; then
     "$ROOT/build_local.sh"
 fi
+CALLER_DIR="$PWD"
 cd "$BUILD_DIR"
 
 PARTY_B_IP="${1:-127.0.0.1}"
@@ -25,6 +28,7 @@ if [[ "${1:-}" != "--file" || $# -lt 3 ]]; then
     exit 2
 fi
 SET_A_FILE="$2"
+[[ "$SET_A_FILE" == /* ]] || SET_A_FILE="$CALLER_DIR/$SET_A_FILE"
 M_B="$3"
 PARTY_TIMING_FILE="${CG_PROTOCOL_TIMING_FILE:-}"
 
@@ -71,19 +75,17 @@ else
 fi
 export CG_PSI2_REVEAL_BOUND="${CG_PSI2_REVEAL_BOUND:-$DEFAULT_REVEAL_BOUND}"
 
-LOG_DIR="$ROOT/logs"
+LOG_DIR="$CG_RUN_LOG_DIR"
 mkdir -p "$LOG_DIR"
 rm -f "$LOG_DIR"/psi2_A*.log "$LOG_DIR"/psi2_a_*.log
 
 cleanup_children() {
     jobs -pr | xargs -r kill 2>/dev/null || true
 }
-trap cleanup_children EXIT
+trap cg_cleanup_children EXIT
 
 if [[ "${CG_SKIP_PORT_CLEANUP:-0}" != "1" ]]; then
-    for port in "$CG_PSI2_FOPA1_RFS" "$CG_PSI2_REVEAL_RFS"; do
-        fuser -k "$port/tcp" 2>/dev/null || true
-    done
+    : # Ports are owned through the run lock; no global port cleanup.
     sleep 1
 fi
 
@@ -116,7 +118,7 @@ wait_or_report() {
     local label="$2"
     local file="$3"
     set +e
-    wait "$pid"
+    cg_wait_child "$pid"
     local status=$?
     set -e
     if (( status != 0 )); then
@@ -159,8 +161,7 @@ wait_for_log "$LOG_DIR/psi2_a_srf_fopa1.log" "listening on :$CG_PSI2_FOPA1_RFS" 
 CG_PROTOCOL_TIMING_FILE="$LOG_DIR/psi2_A_oneway_time.csv" \
     ./cg_rf_psi_sender "$M_B" --input-file "$SET_A_FILE" >"$LOG_DIR/psi2_A_oneway.log" 2>&1 &
 PID_SEND=$!
-wait_or_report "$PID_SEND" "Party A one-way PSI sender" "$LOG_DIR/psi2_A_oneway.log"
-wait_or_report "$PID_SRF1" "A S-RF for one-way PSI" "$LOG_DIR/psi2_a_srf_fopa1.log"
+cg_wait_all "$PID_SEND" "$PID_SRF1"
 
 # Phase 2: A receives Party B's intersection through the reveal-back RF path.
 CG_PSI2_REVEAL_RFR="$CG_PSI2_REVEAL_RFR" CG_PSI2_REVEAL_RFS="$CG_PSI2_REVEAL_RFS" \
@@ -172,8 +173,7 @@ CG_PROTOCOL_TIMING_FILE="$LOG_DIR/psi2_A_reveal_time.csv" \
     ./cg_rf_psi2_reveal_sender --filter-file "$SET_A_FILE" \
         --output-file "$LOG_DIR/psi2_A_intersection.txt" >"$LOG_DIR/psi2_A.log" 2>&1 &
 PID_REVEAL=$!
-wait_or_report "$PID_REVEAL" "Party A reveal endpoint" "$LOG_DIR/psi2_A.log"
-wait_or_report "$PID_SRF_REVEAL" "A S-RF reveal" "$LOG_DIR/psi2_a_srf_reveal.log"
+cg_wait_all "$PID_REVEAL" "$PID_SRF_REVEAL"
 write_combined_timing "$PARTY_TIMING_FILE" "psi2_A" \
     "$LOG_DIR/psi2_A_oneway_time.csv" "$LOG_DIR/psi2_A_reveal_time.csv"
 

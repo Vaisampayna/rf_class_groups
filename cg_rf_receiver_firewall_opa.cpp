@@ -1,9 +1,8 @@
 /**
- * cg_rf_receiver_firewall_opa.cpp — Receiver's RF for OPA/PSI (persistent thread pool)
+ * cg_rf_receiver_firewall_opa.cpp - Receiver firewall for RF-OPA/RF-PSI
  *
- * KEY FIX: global_pool() creates worker threads exactly once at startup.
- * The first parallel_for warms up thread_local CG_Scheme on each worker (once).
- * All subsequent parallel_for calls pay zero construction overhead.
+ * The process uses the shared persistent worker pool. Startup prewarms the
+ * worker-local CG-AHE state before the timed forwarding path begins.
  */
 #include "cg_rf_ole_batch.hpp"
 #include <iostream>
@@ -27,6 +26,7 @@ static void prewarm_pool(CGThreadPool& pool) {
 }
 
 int main() {
+    size_t n_pts = required_env_size("CG_RF_EXPECTED_N");
     size_t N_THREADS = std::thread::hardware_concurrency();
     size_t LANES = rf_transport_lanes();
     size_t CHUNK = rf_chunk_size();
@@ -46,15 +46,14 @@ int main() {
 
     const char* port_rec = rf_port_rec();
     const char* port_rfr = rf_port_rfr();
-    std::vector<int> rec_fds = connect_rf_lanes(LOCALHOST, port_rec, LANES);
+    std::vector<int> rec_fds = connect_rf_lanes(LOCALHOST, port_rec, LANES, n_pts);
 
     int lfd = CGNet::listen_tcp(port_rfr);
     std::cerr << "[rf_receiver_opa] listening on :" << port_rfr
               << " for " << LANES << " transport lane(s)\n";
-    std::vector<int> rfs_fds = accept_rf_lanes(lfd, LANES);
-    close(lfd);
+    std::vector<int> rfs_fds = accept_rf_lanes(lfd, LANES, n_pts);
+    CGNet::close_tcp(lfd);
 
-    size_t n_pts = required_env_size("CG_RF_EXPECTED_N");
     std::cerr << "[rf_receiver_opa] n_pts=" << n_pts << "\n";
 
     CG_AHE::PublicKey pk = CGNet::recv_pk(rec_fds[0], cs);

@@ -1,380 +1,59 @@
-# Running the 2-PC CG/RF Artifact from <controller-ip>
-
-Use this machine, `<controller-ip>`, as the controller. The two protocol machines are:
-
-- Receiver side: `<party-b-user>@<party-b-ip>`
-- Sender side: `<party-a-user>@<party-a-ip>`
-
-The controller starts both remote commands over SSH, collects logs locally, and
-runs offline checkers from `build-portable`.
-
-## 1. Check SSH
-
-Run these on `<controller-ip>`:
-
-```bash
-ssh -o BatchMode=yes <party-b-user>@<party-b-ip> 'hostname && pwd'
-ssh -o BatchMode=yes <party-a-user>@<party-a-ip> 'hostname && pwd'
-```
-
-## 2. Sync the artifact to both protocol machines
-
-Run from the controller copy:
-
-```bash
-cd <controller-workspace>
-
-rsync -az --delete \
-  --exclude build --exclude build-portable --exclude build-2pc \
-  --exclude logs --exclude 'benchmark_2pc_*' \
-  --exclude '*.pdf' --exclude '*.html' \
-  rf_class_groups/ \
-  <party-b-user>@<party-b-ip>:<party-b-repo-path>/
-
-rsync -az --delete \
-  --exclude build --exclude build-portable --exclude build-2pc \
-  --exclude logs --exclude 'benchmark_2pc_*' \
-  --exclude '*.pdf' --exclude '*.html' \
-  rf_class_groups/ \
-  <party-a-user>@<party-a-ip>:<party-a-repo-path>/
-```
-
-## 3. Build checker binaries on the controller
-
-```bash
-cd <controller-repo-path>
-CG_BUILD_DIR="$PWD/build-portable" CMAKE_BUILD_PARALLEL_LEVEL=8 bash build_local.sh
-```
-
-## 4. Build protocol binaries separately on both protocol machines
-
-For final benchmark runs, build directly on each protocol machine.  Both hosts
-are Intel, but they are not the same CPU, so native instruction tuning must be
-done per host.  Do not build once and copy the `build-2pc` directory to the
-other machine.
-
-Install NTL on both protocol machines before configuring:
-
-```bash
-sudo apt-get update
-sudo apt-get install -y build-essential cmake libgmp-dev libssl-dev libntl-dev
-```
-
-The command below enables:
-
-- `CG_ENABLE_NATIVE_ARCH=ON`: compile with `-march=native` on that machine.
-- `CG_ENABLE_LTO=ON`: enable link-time optimization when supported.
-- `CG_USE_NTL_POLY=ON`: use NTL for large PSI polynomial operations.
-- `build-2pc`: the build directory used by all 2-PC run scripts.
-
-```bash
-ssh <party-b-user>@<party-b-ip> \
-  'cd <party-b-repo-path> &&
-   cmake -S . -B build-2pc -DCMAKE_BUILD_TYPE=Release -DCG_ENABLE_NATIVE_ARCH=ON -DCG_ENABLE_LTO=ON -DCG_USE_NTL_POLY=ON &&
-   cmake --build build-2pc -j'
-
-ssh <party-a-user>@<party-a-ip> \
-  'cd <party-a-repo-path> &&
-   cmake -S . -B build-2pc -DCMAKE_BUILD_TYPE=Release -DCG_ENABLE_NATIVE_ARCH=ON -DCG_ENABLE_LTO=ON -DCG_USE_NTL_POLY=ON &&
-   cmake --build build-2pc -j'
-```
-
-The configure output should contain:
-
-```text
-Using NTL for large PSI polynomial operations: /usr/lib/x86_64-linux-gnu/libntl.so
-```
-
-If that line is missing on either host, install NTL on that host and rebuild:
-
-```bash
-sudo apt install libntl-dev
-```
-
-## 5. Quick smoke run
-
-Prefer the per-protocol scripts for artifact testing. Each script below runs exactly one protocol and writes logs/checks under its own timestamped directory on `<controller-ip>`.
-
-```bash
-cd <controller-repo-path>
-
-LOCAL_IP=<party-b-ip> \
-REMOTE_IP=<party-a-ip> \
-LOCAL_USER=<party-b-user> \
-REMOTE_USER=<party-a-user> \
-LOCAL_ROOT=<party-b-repo-path> \
-REMOTE_ROOT=<party-a-repo-path> \
-BUILD_DIR=build-2pc \
-CHECKER_DIR="$PWD/build-portable" \
-CG_Q_NBITS=128 \
-CG_K=1 \
-CG_FIXED_Q=170141183460469232709364739622490341377 \
-CG_USE_NTT_POLY=1 \
-CG_BENCH_INPUT_BITS=128 \
-CG_PSI_INPUT_BITS=128 \
-CG_RF_LANES=8 \
-CG_RF_THREADS_LOCAL=<party-b-thread-count> \
-CG_RF_THREADS_REMOTE=<party-a-thread-count> \
-CG_RF_CHUNK_SIZE=128 \
-CG_CONNECT_RETRIES=7200 \
-TIMEOUT_S=1800 \
-bash run_2pc_rf_psi.sh 16
-```
-
-Available one-protocol scripts:
-
-```bash
-bash run_2pc_direct_ole.sh 1000
-bash run_2pc_rf_ole.sh 1000
-bash run_2pc_direct_ole3.sh 1000
-bash run_2pc_rf_ole3.sh 1000
-bash run_2pc_direct_ope.sh 1000
-bash run_2pc_rf_ope.sh 1000
-bash run_2pc_direct_opa.sh 1000
-bash run_2pc_rf_opa.sh 1000
-bash run_2pc_direct_psi.sh 1000
-bash run_2pc_rf_psi.sh 1000
-bash run_2pc_rf_psi2.sh 1000
-```
-
-For two-way RF-PSI (`one-way RF-PSI + encrypted reveal-back`), the shortest
-controller-side command is:
-
-```bash
-cd <controller-repo-path>
-bash run_2pc_rf_psi2_reveal.sh 1000
-```
-
-Optional overrides:
-
-```bash
-OVERLAP=200 SEED=12345 CG_RF_LANES=8 \
-bash run_2pc_rf_psi2_reveal.sh 1000
-```
-
-Each script uses input files under `/tmp/cg_*` on the protocol machines, then
-runs an offline checker:
-
-- OLE: `cg_check_batch_ole`
-- OPE: `cg_check_ope`
-- OPA: `cg_check_opa`
-- one-way PSI: `check_correctness.py`
-- two-way PSI: `check_psi2_correctness.py`
-
-## 6. Full 2-PC sweep
-
-Recommended full paper-table sweep:
-
-```bash
-cd <controller-repo-path>
-
-LOCAL_IP=<party-b-ip> \
-REMOTE_IP=<party-a-ip> \
-LOCAL_USER=<party-b-user> \
-REMOTE_USER=<party-a-user> \
-LOCAL_ROOT=<party-b-repo-path> \
-REMOTE_ROOT=<party-a-repo-path> \
-BUILD_DIR=build-2pc \
-CHECKER_DIR="$PWD/build-portable" \
-CG_Q_NBITS=128 \
-CG_K=1 \
-CG_FIXED_Q=170141183460469232709364739622490341377 \
-CG_USE_NTT_POLY=1 \
-CG_BENCH_INPUT_BITS=128 \
-CG_PSI_INPUT_BITS=128 \
-CG_RF_LANES=8 \
-CG_RF_THREADS_LOCAL=<party-b-thread-count> \
-CG_RF_THREADS_REMOTE=<party-a-thread-count> \
-CG_RF_CHUNK_SIZE=128 \
-CG_CONNECT_RETRIES=7200 \
-TIMEOUT_S=7200 \
-bash benchmark_2pc_paper_all.sh
-```
-
-By default this runs `N=1024,2048,4096,8192,16384,32768`. For a shorter test,
-pass explicit sizes, for example:
-
-```bash
-bash benchmark_2pc_paper_all.sh 1024
-```
-
-The paper reports `max(local party time, remote party time)` from
-`protocol_times.csv`, not `runs.csv`. Reconstruct a paper-style table with:
-
-```bash
-python3 make_reported_total_table.py <benchmark_2pc_paper_all_...>
-```
-
-The script prints the final `Logs: ...` path. Important files inside that directory:
-
-- `runs.csv`: end-to-end controller wall-clock times.
-- `timings.csv`: parsed internal phase timings from both parties.
-- `checks.csv`: offline correctness checker status.
-- `raw/`: raw receiver-side and sender-side process logs.
-- `io/`: fetched input/output dumps used by the checkers.
-
-## 7. If ports are stuck
-
-Run this from `<controller-ip>` before restarting:
-
-```bash
-ssh <party-b-user>@<party-b-ip> \
-  'fuser -k 9001/tcp 9002/tcp 9003/tcp 9004/tcp 9010/tcp 9041/tcp 9042/tcp 9043/tcp 9103/tcp 9104/tcp >/dev/null 2>&1 || true'
-
-ssh <party-a-user>@<party-a-ip> \
-  'fuser -k 9001/tcp 9002/tcp 9003/tcp 9004/tcp 9010/tcp 9041/tcp 9042/tcp 9043/tcp 9103/tcp 9104/tcp >/dev/null 2>&1 || true'
-```
-
-## 8. Stop a run midway
-
-If a sweep or one-protocol run is still running and you want to stop it, press
-`Ctrl-C` in the controller terminal first.  Then clean up both protocol
-machines from `<controller-ip>`.
-
-Kill CG protocol binaries and helper scripts on the receiver-side host:
-
-```bash
-ssh <party-b-user>@<party-b-ip> \
-  'pkill -f "cg_.*receiver|cg_.*sender|cg_.*firewall|run_.*cg_|run_2pc_" >/dev/null 2>&1 || true;
-   fuser -k 9001/tcp 9002/tcp 9003/tcp 9004/tcp 9010/tcp 9041/tcp 9042/tcp 9043/tcp 9103/tcp 9104/tcp >/dev/null 2>&1 || true'
-```
-
-Kill CG protocol binaries and helper scripts on the sender-side host:
-
-```bash
-ssh <party-a-user>@<party-a-ip> \
-  'pkill -f "cg_.*receiver|cg_.*sender|cg_.*firewall|run_.*cg_|run_2pc_" >/dev/null 2>&1 || true;
-   fuser -k 9001/tcp 9002/tcp 9003/tcp 9004/tcp 9010/tcp 9041/tcp 9042/tcp 9043/tcp 9103/tcp 9104/tcp >/dev/null 2>&1 || true'
-```
-
-If the controller-side sweep script is still alive locally, kill only the
-benchmark launcher scripts:
-
-```bash
-pkill -f "benchmark_2pc_cg_sweep.sh|benchmark_2pc_cg_only.sh|run_2pc_" >/dev/null 2>&1 || true
-```
-
-## 9. Run One Protocol from Files
-
-Use these when you do not want the full sweep.
-
-Common environment used below:
-
-```bash
-export CG_Q_NBITS=128
-export CG_K=1
-export CG_BENCH_INPUT_BITS=128
-export CG_RF_LANES=8
-export CG_RF_CHUNK_SIZE=128
-export CG_CONNECT_RETRIES=7200
-```
-
-### RF-OPA from coefficient files
-
-Prepare coefficient files on the two protocol machines. Coefficients are in constant-term-first order.
-
-Receiver side, `<party-b-ip>`, needs `pB.txt` with `d+1` coefficients:
-
-```bash
-ssh <party-b-user>@<party-b-ip> \
-  'mkdir -p /tmp/cg_inputs && printf -- "-1\n1\n" > /tmp/cg_inputs/pB.txt'
-```
-
-Sender side, `<party-a-ip>`, needs `pA.txt` with `2d+1` coefficients. The
-masking polynomial `rA` is sampled freshly inside the sender binary:
-
-```bash
-ssh <party-a-user>@<party-a-ip> \
-  'mkdir -p /tmp/cg_inputs && printf "1\n2\n3\n" > /tmp/cg_inputs/pA.txt'
-```
-
-Run receiver side first, then sender side. This example uses `d=1`, so
-`n_pts=2d+1=3`.
-
-```bash
-ssh <party-b-user>@<party-b-ip> \
-  'cd <party-b-repo-path>/build-2pc;
-   export CG_Q_NBITS=128 CG_K=1 CG_BENCH_INPUT_BITS=128 CG_RF_LANES=8 CG_RF_CHUNK_SIZE=128 CG_CONNECT_RETRIES=7200 CG_RF_THREADS=28 CG_RF_EXPECTED_N=3;
-   ./cg_rf_opa_receiver 3 1 --input-file /tmp/cg_inputs/pB.txt > ../logs/opa_receiver.log 2>&1 &
-   ./cg_rf_receiver_firewall_opa > ../logs/opa_rf_receiver.log 2>&1;
-   wait'
-```
-
-```bash
-ssh <party-a-user>@<party-a-ip> \
-  'cd <party-a-repo-path>/build-2pc;
-   export CG_Q_NBITS=128 CG_K=1 CG_BENCH_INPUT_BITS=128 CG_RF_LANES=8 CG_RF_CHUNK_SIZE=128 CG_CONNECT_RETRIES=7200 CG_RF_THREADS=32 CG_RF_EXPECTED_N=3;
-   ./cg_rf_sender_firewall_opa <party-b-ip> > ../logs/opa_rf_sender.log 2>&1 &
-   sleep 1;
-   ./cg_rf_opa_sender 3 1 --input-file /tmp/cg_inputs/pA.txt > ../logs/opa_sender.log 2>&1;
-   wait'
-```
-
-### One-Way RF-PSI from set files
-
-Receiver side has `set_B.txt`; sender side has `set_A.txt`. The receiver learns the intersection.
-
-```bash
-ssh <party-b-user>@<party-b-ip> \
-  'mkdir -p /tmp/cg_inputs && printf "10\n20\n30\n40\n" > /tmp/cg_inputs/set_B.txt'
-
-ssh <party-a-user>@<party-a-ip> \
-  'mkdir -p /tmp/cg_inputs && printf "30\n40\n50\n60\n" > /tmp/cg_inputs/set_A.txt'
-```
-
-Here `m_A=4` and `m_B=4`.
-
-```bash
-ssh <party-b-user>@<party-b-ip> \
-  'cd <party-b-repo-path>;
-   CG_BUILD_DIR=$PWD/build-2pc CG_Q_NBITS=128 CG_K=1 CG_BENCH_INPUT_BITS=128 CG_RF_LANES=8 CG_RF_THREADS=28 CG_RF_CHUNK_SIZE=128 CG_CONNECT_RETRIES=7200 \
-   bash ./run_rf_cg_psi_lan_receiver.sh --file /tmp/cg_inputs/set_B.txt 4 /tmp/cg_inputs/intersection_out.txt'
-```
-
-```bash
-ssh <party-a-user>@<party-a-ip> \
-  'cd <party-a-repo-path>;
-   CG_BUILD_DIR=$PWD/build-2pc CG_Q_NBITS=128 CG_K=1 CG_BENCH_INPUT_BITS=128 CG_RF_LANES=8 CG_RF_THREADS=32 CG_RF_CHUNK_SIZE=128 CG_CONNECT_RETRIES=7200 \
-   bash ./run_rf_cg_psi_lan_sender.sh <party-b-ip> --file /tmp/cg_inputs/set_A.txt 4'
-```
-
-Fetch the receiver output:
-
-```bash
-ssh <party-b-user>@<party-b-ip> 'cat /tmp/cg_inputs/intersection_out.txt'
-```
-
-### Exact Two-Way RF-PSI from set files
-
-Both parties learn the intersection. Start Party B on `<party-b-ip>` first, then Party A on `<party-a-ip>`.
-
-```bash
-ssh <party-b-user>@<party-b-ip> \
-  'mkdir -p /tmp/cg_inputs && printf "10\n20\n30\n40\n" > /tmp/cg_inputs/set_B.txt'
-
-ssh <party-a-user>@<party-a-ip> \
-  'mkdir -p /tmp/cg_inputs && printf "30\n40\n50\n60\n" > /tmp/cg_inputs/set_A.txt'
-```
-
-Here `m_A=4`, `m_B=4`.
-
-```bash
-ssh <party-b-user>@<party-b-ip> \
-  'cd <party-b-repo-path>;
-   CG_BUILD_DIR=$PWD/build-2pc CG_Q_NBITS=128 CG_K=1 CG_BENCH_INPUT_BITS=128 CG_RF_LANES=8 CG_RF_THREADS=10 CG_RF_CHUNK_SIZE=128 CG_CONNECT_RETRIES=7200 \
-   bash ./run_rf_cg_psi2_lan_b.sh <party-a-ip> --file 4 /tmp/cg_inputs/set_B.txt'
-```
-
-```bash
-ssh <party-a-user>@<party-a-ip> \
-  'cd <party-a-repo-path>;
-   CG_BUILD_DIR=$PWD/build-2pc CG_Q_NBITS=128 CG_K=1 CG_BENCH_INPUT_BITS=128 CG_RF_LANES=8 CG_RF_THREADS=12 CG_RF_CHUNK_SIZE=128 CG_CONNECT_RETRIES=7200 \
-   bash ./run_rf_cg_psi2_lan_a.sh <party-b-ip> --file /tmp/cg_inputs/set_A.txt 4'
-```
-
-The two-way logs are:
-
-```bash
-ssh <party-b-user>@<party-b-ip> 'cat <party-b-repo-path>/logs/psi2_B.log'
-ssh <party-a-user>@<party-a-ip> 'cat <party-a-repo-path>/logs/psi2_A.log'
-```
+# Two-machine setup
+
+The complete command sequence is in [README.md](README.md):
+
+- Section 4: machine variables, passwordless SSH, dependencies, and source copying.
+- Section 5: native builds on both protocol hosts and portable controller checkers.
+- Section 6: runtime settings and small two-machine smoke tests.
+- Section 7: all twelve protocols and the six-size sweep.
+- Section 8: output files and verification.
+- Section 10: connection, build, and port troubleshooting.
+
+Run the controller commands from one shell so exported variables remain set.
+`LOCAL_*` identifies Party B (receiver), and `REMOTE_*` identifies Party A
+(sender). The controller may be either host or a separate machine. SSH access
+is required from the controller to both hosts; protocol hosts communicate over
+TCP and do not need SSH access to each other.
+
+## Entry points
+
+| Script | Purpose |
+| --- | --- |
+| `run_2pc_direct_ole.sh`, `run_2pc_rf_ole.sh` | One batched OLE experiment. |
+| `run_2pc_direct_ole3.sh`, `run_2pc_rf_ole3.sh` | One 3-round OLE experiment. |
+| `run_2pc_direct_ope.sh`, `run_2pc_rf_ope.sh` | One OPE experiment. |
+| `run_2pc_direct_opa.sh`, `run_2pc_rf_opa.sh` | One OPA experiment. |
+| `run_2pc_direct_psi.sh`, `run_2pc_rf_psi.sh` | One one-way PSI experiment. |
+| `run_2pc_direct_psi2.sh`, `run_2pc_rf_psi2.sh` | One two-way PSI experiment. |
+| `benchmark_2pc_paper_all.sh` | All twelve protocols over the requested sizes. |
+| `run_2pc_direct_psi2_sweep.sh`, `run_2pc_rf_psi2_sweep.sh` | Two-way PSI only, over the requested sizes. |
+
+Individual protocol launchers take one benchmark size `N`; sweep scripts take
+one or more sizes. Size meanings are explained in README Section 7.
+`benchmark_2pc_cg_sweep.sh` is a compatibility alias for the full paper driver.
+
+`run_2pc_rf_psi2_reveal.sh` is an optional wrapper around `run_2pc_rf_psi2.sh`.
+It selects the public generated overlap as the RF reveal-slot bound. The main
+single-run launcher instead defaults to `N` slots. Both use the same `28/32`
+receiver/sender RF PSI2 thread defaults unless overridden. Use the main launcher
+or full paper driver for the command sequence in README.
+
+## Runtime notes
+
+- Use matching source versions, scheme parameters, lanes, and chunk sizes on
+  both hosts. `CG_VALIDATE_LANES=1` enables optional configuration checks;
+  the documented timing setup uses `0`.
+- `CG_BIND_ADDR` selects the listener interface; LAN launchers default to
+  `0.0.0.0`. `CG_IO_TIMEOUT_S` defaults to 180 seconds.
+- Run experiments sequentially with the default port map. For concurrent runs,
+  use disjoint ports and `CG_RUN_LOCK` paths.
+- Each individual run records settings in `run_config.txt` and writes logs under
+  `raw/`. RF PSI2 output files fetched by the checker are in `io/<run>/`.
+- Use a fresh `OUT_DIR` for each experiment. Do not reuse a previous sweep's
+  directory. Unset `OUT_DIR` after a sweep before starting individual runs.
+- PSI files must contain unique elements in `[0,q-1]`. Both two-way variants
+  have the zero-padding correctness limitation documented in README Section 9.
+
+The `run_rf_cg_*_lan_*.sh` scripts are lower-level entry points for manually
+starting one host's roles. Controller launchers supply the matching parameters,
+inputs, and start order automatically; use them for the reviewer workflow.

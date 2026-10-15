@@ -24,7 +24,7 @@ int main(int argc, char** argv) {
     const auto& cs = cg.cs();
     const BICYCL::Mpz& q = cs.cleartext_bound();
 
-    size_t m_A = std::stoull(argv[1]);
+    size_t m_A = cg_parse_size(argv[1]);
     std::vector<BICYCL::Mpz> set_B;
     std::string output_file = "intersection_out.txt";
     std::string timing_file;
@@ -44,8 +44,8 @@ int main(int argc, char** argv) {
         set_B = read_mpz_list_file(argv[3], q, "psi_receiver");
         std::cerr << "[psi_receiver] Read S_B from " << argv[3] << "\n";
     } else if (std::string(argv[2]) == "--random") {
-        size_t m_B = (argc > 3) ? std::stoull(argv[3]) : 1000;
-        uint64_t seed = (argc > 4) ? std::stoull(argv[4]) : 99;
+        size_t m_B = (argc > 3) ? cg_parse_size(argv[3]) : 1000;
+        uint64_t seed = (argc > 4 && std::string(argv[4]).rfind("--", 0) != 0) ? cg_parse_u64(argv[4]) : 42;
         std::vector<BICYCL::Mpz> ignored_A;
         make_random_psi_sets_full_field(m_A, m_B, seed, q, ignored_A, set_B);
 
@@ -54,13 +54,14 @@ int main(int argc, char** argv) {
                   << " expected overlaps (benchmark seed=" << seed << ")\n";
     } else {
         for (int i = 2; i < argc; ++i) {
-            if (std::string(argv[i]) == "--output-file" && i + 1 < argc) {
+            if ((std::string(argv[i]) == "--output-file" || std::string(argv[i]) == "--timing-file") && i + 1 < argc) {
                 ++i;
                 continue;
             }
             set_B.emplace_back(std::string(argv[i]).c_str());
         }
     }
+    validate_psi_set(set_B, q, "cg_rf_psi_receiver");
     std::cerr << "[psi_receiver] benchmark set input sampling excluded from protocol time: "
               << ms_since(t_input) << " ms\n";
 
@@ -69,7 +70,7 @@ int main(int argc, char** argv) {
     // and the membership test, but excludes writing the output/check files.
     auto t_poly = Clock::now();
     size_t m_B = set_B.size();
-    size_t n_pts = psi_opa_point_count(m_A + m_B + 1, q);
+    size_t n_pts = psi_opa_point_count(cg_checked_add(cg_checked_add(m_A, m_B), 1), q);
     std::cerr << "[psi_receiver] |S_A|=" << m_A << ", |S_B|=" << m_B
               << ", n_pts=" << n_pts << "\n";
 

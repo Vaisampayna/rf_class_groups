@@ -15,6 +15,7 @@
 #include <sstream>
 
 int main(int argc, char** argv) {
+    const size_t reveal_bound = required_env_size("CG_PSI2_REVEAL_BOUND");
     std::string output_file = "psi2_sender_intersection.txt";
     std::string filter_file;
     for (int i = 1; i + 1 < argc; ++i) {
@@ -23,6 +24,14 @@ int main(int argc, char** argv) {
         else if (std::string(argv[i]) == "--filter-file")
             filter_file = argv[i + 1];
     }
+    if (filter_file.empty()) {
+        std::cerr << "Usage: " << argv[0]
+                  << " --filter-file set_A.txt [--output-file out.txt]\n";
+        std::cerr << "[psi2_reveal_sender] --filter-file is required to restrict revealed values "
+                  << "to Party A's set; zero padding can still produce a false zero "
+                  << "when 0 is in A but not in B and an unused slot is present\n";
+        return 2;
+    }
 
     BICYCL::RandGen rng = make_secure_randgen();
     CG_AHE::CG_Scheme cg = make_cg_scheme(rng);
@@ -30,30 +39,20 @@ int main(int argc, char** argv) {
     auto& pool = global_pool();
     prewarm_batch_pool();
     std::set<std::string> own_values;
-    if (!filter_file.empty()) {
-        std::ifstream in(filter_file);
-        if (!in)
-            throw std::runtime_error(std::string("psi2_reveal_sender: cannot open filter file ") + filter_file);
-        std::string token;
-        while (in >> token) {
-            BICYCL::Mpz x(token.c_str());
-            std::ostringstream oss;
-            oss << x;
-            own_values.insert(oss.str());
-        }
+    for (const auto& x : read_mpz_list_file(filter_file, cs.cleartext_bound(), "psi2_reveal_sender")) {
+        std::ostringstream value; value << x; own_values.insert(value.str());
     }
 
     const size_t LANES = rf_transport_lanes();
     const char* port_rfs = env_or_default("CG_PSI2_REVEAL_RFS", "9041");
 
     auto t_protocol = Clock::now();
-    std::vector<int> fds = connect_rf_lanes(LOCALHOST, port_rfs, LANES);
+    std::vector<int> fds = connect_rf_lanes(LOCALHOST, port_rfs, LANES, reveal_bound);
 
     CG_AHE::SecretKey sk = cg.keygen_sk();
     CG_AHE::PublicKey pk = cg.keygen_pk(sk);
     CGNet::send_pk(fds[0], pk);
 
-    const size_t reveal_bound = required_env_size("CG_PSI2_REVEAL_BOUND");
     std::cerr << "[psi2_reveal_sender] expecting " << reveal_bound
               << " fixed reveal slot(s)\n";
 
@@ -73,7 +72,9 @@ int main(int argc, char** argv) {
         std::ostringstream oss;
         oss << values[i];
         const std::string key = oss.str();
-        if ((own_values.empty() || own_values.count(key)) && seen.insert(key).second)
+        // Membership filtering does not resolve zero padding when 0 is in A
+        // but not in B: an unused slot then yields a false intersection value.
+        if (own_values.count(key) && seen.insert(key).second)
             intersection.push_back(values[i]);
     }
 

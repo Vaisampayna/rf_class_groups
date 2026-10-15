@@ -10,7 +10,7 @@
 
 int main(int argc, char** argv)
 {
-    size_t n_oles = (argc > 1) ? std::strtoull(argv[1], nullptr, 10) : 1000;
+    size_t n_oles = (argc > 1) ? cg_parse_size(argv[1]) : 1000;
     const char* receiver_ip = (argc > 2) ? argv[2] : LOCALHOST;
     const char* port = (argc > 3) ? argv[3] : ole3_port_rec();
     const size_t LANES = rf_transport_lanes();
@@ -39,7 +39,7 @@ int main(int argc, char** argv)
     std::cerr << "[ole3_sender] key generation done in "
               << ms_since(t_protocol) << " ms\n";
 
-    std::vector<int> fds = connect_rf_lanes(receiver_ip, port, LANES);
+    std::vector<int> fds = connect_rf_lanes(receiver_ip, port, LANES, n_oles);
     CGNet::send_pk(fds[0], pk);
 
     auto& pool = global_pool();

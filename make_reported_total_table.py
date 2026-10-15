@@ -15,6 +15,7 @@ import csv
 import re
 import sys
 from pathlib import Path
+from benchmark_status import valid_ms, run_succeeded
 
 SIZES = [1024, 2048, 4096, 8192, 16384, 32768]
 NUM = r"([0-9.eE+-]+)"
@@ -24,58 +25,68 @@ def last_number(path: Path, pattern: str):
     if not path.exists():
         return None
     vals = re.findall(pattern, path.read_text(errors="replace"))
-    return float(vals[-1]) if vals else None
+    return valid_ms(vals[-1]) if vals else None
 
 
 def csv_party_times(root: Path, run: str):
     out = {}
+    if not run_succeeded(root, run, require_check=True):
+        return out
     p = root / "protocol_times.csv"
     if not p.exists():
         return out
     with p.open(newline="") as f:
         for row in csv.DictReader(f):
             if row["run"] == run:
-                out[row["side"]] = float(row["protocol_time_ms"])
+                value = valid_ms(row["protocol_time_ms"])
+                if value is not None and row["side"] in ("local", "remote"):
+                    out[row["side"]] = value
     return out
 
 
 def max_csv(root: Path, run: str):
-    vals = csv_party_times(root, run).values()
-    return max(vals) if vals else None
+    parties = csv_party_times(root, run)
+    return max(parties.values()) if set(parties) == {"local", "remote"} else None
 
 
 def max_from_logs(root: Path, run: str, pattern: str):
+    if not run_succeeded(root, run, require_check=True):
+        return None
     vals = []
     for side in ("local", "remote"):
         v = last_number(root / "raw" / f"{run}_{side}.log", pattern)
         if v is not None:
             vals.append(v)
-    return max(vals) if vals else None
+    return max(vals) if len(vals) == 2 else None
 
 
 def rf_opa_wall(root: Path, run: str):
+    if not run_succeeded(root, run, require_check=True):
+        return None
     vals = []
     for side in ("local", "remote"):
         log = root / "raw" / f"{run}_{side}.log"
-        eval_ms = last_number(log, rf"OPA setup/evaluation done in {NUM} ms") or 0.0
+        eval_ms = last_number(log, rf"OPA setup/evaluation done in {NUM} ms")
         exch_ms = last_number(
             log,
             rf"OPA RF-OLE (?:output-share receive|send-share exchange) done in {NUM} ms",
         )
-        if exch_ms is not None:
+        if exch_ms is not None and eval_ms is not None:
             vals.append(eval_ms + exch_ms)
-    return max(vals) if vals else None
+    return max(vals) if len(vals) == 2 else None
 
 
 def rf_psi_wall(root: Path, run: str):
+    if not run_succeeded(root, run, require_check=True):
+        return None
     vals = []
     for side in ("local", "remote"):
         log = root / "raw" / f"{run}_{side}.log"
         if side == "local":
-            poly_ms = last_number(log, rf"vanishing polynomial build done in {NUM} ms") or 0.0
+            poly_ms = last_number(log, rf"vanishing polynomial build done in {NUM} ms")
             rfopa_ms = last_number(log, rf"RF-OPA output-share receive done in {NUM} ms")
             out_ms = last_number(log, rf"output reconstruction and verification done in {NUM} ms")
-            if rfopa_ms is not None and out_ms is not None:
+            if poly_ms is not None and rfopa_ms is not None and out_ms is not None:
                 vals.append(poly_ms + rfopa_ms + out_ms)
         else:
             poly_ms = (
@@ -83,28 +94,33 @@ def rf_psi_wall(root: Path, run: str):
                     log,
                     rf"vanishing polynomial and random mask polynomials generation done in {NUM} ms",
                 )
-                or 0.0
+
             )
             rfopa_ms = last_number(log, rf"RF-OPA send-share exchange done in {NUM} ms")
-            if rfopa_ms is not None:
+            if poly_ms is not None and rfopa_ms is not None:
                 vals.append(poly_ms + rfopa_ms)
-    return max(vals) if vals else None
+    return max(vals) if len(vals) == 2 else None
 
 
 def rf_psi2_wall(root: Path, n: int):
     csv_val = max_csv(root, f"rf_psi2_reveal_{n}")
     if csv_val is not None:
         return csv_val
+    run = f"rf_psi2_reveal_{n}"
+    if not run_succeeded(root, run, require_check=True):
+        return None
     child = root / f"run_rf_psi2_{n}" / "raw"
     vals = []
     for side, label in (("local", "B"), ("remote", "A")):
         log = child / f"rf_psi2_reveal_{n}_{side}.log"
-        reveal_ms = last_number(log, rf"reveal-back phase done in {NUM} ms") or 0.0
+        reveal_ms = last_number(log, rf"reveal-back phase done in {NUM} ms")
+        if reveal_ms is None:
+            return None
         if label == "B":
-            poly_ms = last_number(log, rf"vanishing polynomial build done in {NUM} ms") or 0.0
+            poly_ms = last_number(log, rf"vanishing polynomial build done in {NUM} ms")
             rfopa_ms = last_number(log, rf"RF-OPA output-share receive done in {NUM} ms")
             out_ms = last_number(log, rf"output reconstruction and verification done in {NUM} ms")
-            if rfopa_ms is not None and out_ms is not None:
+            if poly_ms is not None and rfopa_ms is not None and out_ms is not None:
                 vals.append(poly_ms + rfopa_ms + out_ms + reveal_ms)
         else:
             poly_ms = (
@@ -112,12 +128,12 @@ def rf_psi2_wall(root: Path, n: int):
                     log,
                     rf"vanishing polynomial and random mask polynomials generation done in {NUM} ms",
                 )
-                or 0.0
+
             )
             rfopa_ms = last_number(log, rf"RF-OPA send-share exchange done in {NUM} ms")
-            if rfopa_ms is not None:
+            if poly_ms is not None and rfopa_ms is not None:
                 vals.append(poly_ms + rfopa_ms + reveal_ms)
-    return max(vals) if vals else None
+    return max(vals) if len(vals) == 2 else None
 
 
 def sec(ms):

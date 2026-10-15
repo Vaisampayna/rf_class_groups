@@ -9,7 +9,7 @@
 #include <iostream>
 
 int main(int argc, char* argv[]) {
-    size_t n_oles = (argc > 1) ? std::strtoull(argv[1], nullptr, 10) : 1000;
+    size_t n_oles = (argc > 1) ? cg_parse_size(argv[1]) : 1000;
     const char* receiver_ip = (argc > 2) ? argv[2] : LOCALHOST;
     const char* port = (argc > 3) ? argv[3] : rf_port_rec();
     const char* input_file = nullptr;
@@ -57,7 +57,7 @@ int main(int argc, char* argv[]) {
 
     std::cerr << "[batch_ole_sender] Direct batched OLE, n_oles=" << n_oles
               << ", lanes=" << LANES << "\n";
-    std::vector<int> fds = connect_rf_lanes(receiver_ip, port, LANES);
+    std::vector<int> fds = connect_rf_lanes(receiver_ip, port, LANES, n_oles);
     std::cerr << "[batch_ole_sender] connected to receiver at "
               << receiver_ip << ":" << port << "\n";
 

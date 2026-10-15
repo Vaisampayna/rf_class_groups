@@ -10,7 +10,7 @@
 
 int main(int argc, char** argv)
 {
-    size_t n_oles = (argc > 1) ? std::strtoull(argv[1], nullptr, 10) : 1000;
+    size_t n_oles = (argc > 1) ? cg_parse_size(argv[1]) : 1000;
     const char* port = (argc > 2) ? argv[2] : ole3_port_rec();
     const size_t LANES = rf_transport_lanes();
 
@@ -38,8 +38,8 @@ int main(int argc, char** argv)
     int lfd = CGNet::listen_tcp(port);
     std::cerr << "[ole3_receiver] listening on :" << port
               << " for " << LANES << " lane(s)\n";
-    std::vector<int> fds = accept_rf_lanes(lfd, LANES);
-    close(lfd);
+    std::vector<int> fds = accept_rf_lanes(lfd, LANES, n_oles);
+    CGNet::close_tcp(lfd);
 
     CG_AHE::PublicKey pk = CGNet::recv_pk(fds[0], cs);
 

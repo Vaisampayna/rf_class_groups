@@ -1,9 +1,9 @@
 /**
- * cg_rf_ole_batch.hpp — Batched RF-OLE wrappers (persistent thread pool)
+ * cg_rf_ole_batch.hpp - Batched RF-OLE wrappers
  *
- * KEY FIX: All parallel_for calls reuse the same worker threads from global_pool().
- * thread_local CG_Scheme (560ms each) is constructed exactly once per worker.
- * A prewarm_batch_pool() call at binary startup pays this cost before any I/O.
+ * Batched OLE, OPA, OPE, and PSI share this RF-OLE transport layer. Crypto
+ * loops use the process-wide worker pool, and binaries prewarm that pool before
+ * starting the timed network path.
  */
 #pragma once
 /*
@@ -25,6 +25,12 @@
 #include <thread>
 #include <numeric>
 #include <sys/socket.h>
+#include <openssl/sha.h>
+
+inline bool validate_lane_metadata() {
+    const char* value = std::getenv("CG_VALIDATE_LANES");
+    return value && std::string(value) == "1";
+}
 
 inline void tune_socket_batch(int fd) {
     CGNet::set_tcp_opts(fd);
@@ -40,28 +46,20 @@ inline CG_AHE::CG_Scheme& worker_cg() {
 }
 
 inline size_t rf_transport_lanes() {
-    const char* env = std::getenv("CG_RF_LANES");
-    if (!env || !*env) return 1;
-    char* end = nullptr;
-    unsigned long lanes = std::strtoul(env, &end, 10);
-    if (end == env || lanes == 0) return 1;
-    return (size_t)lanes;
+    return cg_config_size("CG_RF_LANES", 1, 64);
 }
 
 inline size_t rf_chunk_size() {
-    const char* env = std::getenv("CG_RF_CHUNK_SIZE");
-    if (!env || !*env) return 64;
-    char* end = nullptr;
-    unsigned long chunk = std::strtoul(env, &end, 10);
-    if (end == env || chunk == 0) return 64;
-    return (size_t)chunk;
+    return cg_config_size("CG_RF_CHUNK_SIZE", 64);
 }
 
 inline std::pair<size_t, size_t> rf_lane_range(size_t n, size_t lanes, size_t lane) {
     // Deterministic contiguous sharding: both endpoints compute the same
     // ciphertext range for each lane, so lane payloads need no per-item tags.
-    size_t begin = (n * lane) / lanes;
-    size_t end   = (n * (lane + 1)) / lanes;
+    cg_validate_count(n);
+    if (!lanes || lanes > 64 || lane >= lanes) throw std::runtime_error("invalid lane range");
+    size_t begin = (n / lanes) * lane + ((n % lanes) * lane) / lanes;
+    size_t end = (n / lanes) * (lane + 1) + ((n % lanes) * (lane + 1)) / lanes;
     return {begin, end};
 }
 
@@ -76,35 +74,77 @@ inline std::pair<size_t, size_t> rf_lane_range_intersection(
     return {std::max(lb, begin), std::min(le, end)};
 }
 
-inline std::vector<int> accept_rf_lanes(int lfd, size_t lanes) {
+inline std::string rf_parameter_digest() {
+    auto& cg = worker_cg();
+    std::ostringstream parameters;
+    parameters << "CG-LANES-V2:" << cg.cs().cleartext_bound() << ':'
+               << cg.cs().Cl_G().discriminant() << ':' << cg.cs().Cl_Delta().discriminant()
+               << ':' << ntt_runtime_enabled() << ':'
+               << env_or_default("CG_PROTOCOL_ID", "manual");
+    auto text = parameters.str();
+    unsigned char digest[32];
+    SHA256(reinterpret_cast<const unsigned char*>(text.data()), text.size(), digest);
+    return std::string(reinterpret_cast<char*>(digest), 32);
+}
+
+inline void send_rf_metadata(int fd, size_t lanes, size_t count) {
+    CGNet::send_u32(fd, 0x43470002);
+    CGNet::send_u64(fd, lanes); CGNet::send_u64(fd, count);
+    CGNet::send_u64(fd, rf_chunk_size());
+    auto digest = rf_parameter_digest();
+    CGNet::send_all(fd, digest.data(), digest.size());
+}
+inline void check_rf_metadata(int fd, size_t lanes, size_t count) {
+    auto version = CGNet::recv_u32(fd);
+    auto peer_lanes = CGNet::recv_u64(fd), peer_count = CGNet::recv_u64(fd);
+    auto chunk = CGNet::recv_u64(fd);
+    char digest[32]; CGNet::recv_all(fd, digest, sizeof(digest));
+    auto expected = rf_parameter_digest();
+    if (version != 0x43470002 || peer_lanes != lanes || peer_count != count ||
+        chunk != rf_chunk_size() || std::memcmp(digest, expected.data(), sizeof(digest)))
+        throw std::runtime_error("RF lane parameter/count/chunk mismatch");
+}
+inline std::vector<int> accept_rf_lanes(int lfd, size_t lanes, size_t count) {
+    cg_validate_count(count);
     std::vector<int> fds(lanes, -1);
-    for (size_t accepted = 0; accepted < lanes; ++accepted) {
-        int fd = CGNet::accept_one(lfd);
-        tune_socket_batch(fd);
-        // TCP connections can be accepted in a different order from connect().
-        // The initiator sends its lane id immediately so we can reorder fds.
-        uint64_t lane_u64 = CGNet::recv_u64(fd);
-        if (lane_u64 >= lanes || fds[(size_t)lane_u64] != -1) {
-            close(fd);
-            throw std::runtime_error("invalid or duplicate RF transport lane id");
+    int current = -1;
+    try {
+        for (size_t accepted = 0; accepted < lanes; ++accepted) {
+            current = CGNet::accept_one(lfd);
+            auto lane = CGNet::recv_u64(current);
+            if (lane >= lanes || fds[lane] != -1)
+                throw std::runtime_error("invalid or duplicate RF lane id");
+            if (validate_lane_metadata()) {
+                check_rf_metadata(current, lanes, count);
+                send_rf_metadata(current, lanes, count);
+            }
+            fds[lane] = current; current = -1;
         }
-        fds[(size_t)lane_u64] = fd;
+    } catch (...) {
+        if (current >= 0) CGNet::close_tcp(current);
+        for (int fd : fds) CGNet::close_tcp(fd);
+        throw;
     }
     return fds;
 }
-
-inline std::vector<int> connect_rf_lanes(const char* host, const char* port, size_t lanes) {
-    std::vector<int> fds(lanes);
-    for (size_t lane = 0; lane < lanes; ++lane) {
-        fds[lane] = CGNet::connect_tcp_retry(host, port);
-        tune_socket_batch(fds[lane]);
-        CGNet::send_u64(fds[lane], (uint64_t)lane);
-    }
+inline std::vector<int> connect_rf_lanes(const char* host, const char* port, size_t lanes, size_t count) {
+    cg_validate_count(count);
+    std::vector<int> fds;
+    try {
+        for (size_t lane = 0; lane < lanes; ++lane) {
+            int fd = CGNet::connect_tcp_retry(host, port); fds.push_back(fd);
+            CGNet::send_u64(fd, lane);
+            if (validate_lane_metadata()) {
+                send_rf_metadata(fd, lanes, count);
+                check_rf_metadata(fd, lanes, count);
+            }
+        }
+    } catch (...) { for (int fd : fds) CGNet::close_tcp(fd); throw; }
     return fds;
 }
 
 inline void close_rf_lanes(std::vector<int>& fds) {
-    for (int fd : fds) close(fd);
+    for (int fd : fds) CGNet::close_tcp(fd);
     fds.clear();
 }
 
@@ -122,108 +162,72 @@ inline double last_rf_ole_online_ms() {
     return g_last_rf_ole_online_ms;
 }
 
-inline void send_ct_lanes(
-    const std::vector<int>& fds,
-    const std::vector<CG_AHE::CipherText>& values,
-    size_t n)
-{
-    const size_t lanes = fds.size();
+template<class Fn>
+inline void rf_parallel_io(const std::vector<int>& fds, const std::vector<size_t>& lanes, Fn fn) {
     std::vector<std::thread> workers;
-    workers.reserve(lanes);
-    for (size_t lane = 0; lane < lanes; ++lane) {
-        workers.emplace_back([&, lane] {
-            auto [begin, end] = rf_lane_range(n, lanes, lane);
-            for (size_t i = begin; i < end; ++i)
-                CGNet::send_ct(fds[lane], values[i]);
+    std::mutex failure_mutex;
+    std::exception_ptr failure;
+    auto cancel = [&] { for (int fd : fds) shutdown(fd, SHUT_RDWR); };
+    try {
+        for (size_t lane : lanes) workers.emplace_back([&, lane] {
+            try { fn(lane); }
+            catch (...) {
+                { std::lock_guard<std::mutex> lock(failure_mutex);
+                  if (!failure) failure = std::current_exception(); }
+                cancel();
+            }
         });
+    } catch (...) {
+        cancel(); for (auto& worker : workers) worker.join(); throw;
     }
     for (auto& worker : workers) worker.join();
+    if (failure) std::rethrow_exception(failure);
 }
-
-inline void send_ct_lanes_range(
-    const std::vector<int>& fds,
-    const std::vector<CG_AHE::CipherText>& values,
-    size_t n,
-    size_t begin,
-    size_t end)
-{
-    const size_t lanes = fds.size();
-    if (lanes == 1) {
-        for (size_t i = begin; i < end; ++i)
-            CGNet::send_ct(fds[0], values[i]);
+inline std::vector<size_t> rf_active_lanes(const std::vector<int>& fds, size_t n,
+                                          size_t size, size_t begin, size_t end) {
+    cg_validate_count(n);
+    if (fds.empty() || fds.size() > 64 || n > size || begin > end || end > n)
+        throw std::runtime_error("invalid RF I/O range");
+    std::vector<size_t> active;
+    for (size_t lane = 0; lane < fds.size(); ++lane) {
+        auto range = rf_lane_range_intersection(n, fds.size(), lane, begin, end);
+        if (range.first < range.second) active.push_back(lane);
+    }
+    return active;
+}
+inline void send_ct_lanes_range(const std::vector<int>& fds,
+                               const std::vector<CG_AHE::CipherText>& values,
+                               size_t n, size_t begin, size_t end) {
+    auto lanes = rf_active_lanes(fds, n, values.size(), begin, end);
+    if (fds.size() == 1) {
+        for (size_t i = begin; i < end; ++i) CGNet::send_ct(fds[0], values[i]);
         return;
     }
-
-    // A chunk may touch only a few lane ranges.  Restricting work to those
-    // lanes avoids spawning idle I/O threads on small chunks.
-    std::vector<size_t> active_lanes;
-    active_lanes.reserve(lanes);
-    for (size_t lane = 0; lane < lanes; ++lane) {
-        auto [b, e] = rf_lane_range_intersection(n, lanes, lane, begin, end);
-        if (b < e) active_lanes.push_back(lane);
-    }
-
-    std::vector<std::thread> workers;
-    workers.reserve(active_lanes.size());
-    for (size_t lane : active_lanes) {
-        workers.emplace_back([&, lane] {
-            auto [b, e] = rf_lane_range_intersection(n, lanes, lane, begin, end);
-            for (size_t i = b; i < e; ++i)
-                CGNet::send_ct(fds[lane], values[i]);
-        });
-    }
-    for (auto& worker : workers) worker.join();
+    rf_parallel_io(fds, lanes, [&](size_t lane) {
+        auto range = rf_lane_range_intersection(n, fds.size(), lane, begin, end);
+        for (size_t i = range.first; i < range.second; ++i) CGNet::send_ct(fds[lane], values[i]);
+    });
 }
-
-inline void recv_ct_lanes(
-    const std::vector<int>& fds,
-    std::vector<CG_AHE::CipherText>& values,
-    size_t n)
-{
-    const size_t lanes = fds.size();
-    std::vector<std::thread> workers;
-    workers.reserve(lanes);
-    for (size_t lane = 0; lane < lanes; ++lane) {
-        workers.emplace_back([&, lane] {
-            auto [begin, end] = rf_lane_range(n, lanes, lane);
-            for (size_t i = begin; i < end; ++i)
-                values[i] = CGNet::recv_ct(fds[lane]);
-        });
-    }
-    for (auto& worker : workers) worker.join();
-}
-
-inline void recv_ct_lanes_range(
-    const std::vector<int>& fds,
-    std::vector<CG_AHE::CipherText>& values,
-    size_t n,
-    size_t begin,
-    size_t end)
-{
-    const size_t lanes = fds.size();
-    if (lanes == 1) {
-        for (size_t i = begin; i < end; ++i)
-            values[i] = CGNet::recv_ct(fds[0]);
+inline void recv_ct_lanes_range(const std::vector<int>& fds,
+                               std::vector<CG_AHE::CipherText>& values,
+                               size_t n, size_t begin, size_t end) {
+    auto lanes = rf_active_lanes(fds, n, values.size(), begin, end);
+    if (fds.size() == 1) {
+        for (size_t i = begin; i < end; ++i) values[i] = CGNet::recv_ct(fds[0]);
         return;
     }
-
-    std::vector<size_t> active_lanes;
-    active_lanes.reserve(lanes);
-    for (size_t lane = 0; lane < lanes; ++lane) {
-        auto [b, e] = rf_lane_range_intersection(n, lanes, lane, begin, end);
-        if (b < e) active_lanes.push_back(lane);
-    }
-
-    std::vector<std::thread> workers;
-    workers.reserve(active_lanes.size());
-    for (size_t lane : active_lanes) {
-        workers.emplace_back([&, lane] {
-            auto [b, e] = rf_lane_range_intersection(n, lanes, lane, begin, end);
-            for (size_t i = b; i < e; ++i)
-                values[i] = CGNet::recv_ct(fds[lane]);
-        });
-    }
-    for (auto& worker : workers) worker.join();
+    rf_parallel_io(fds, lanes, [&](size_t lane) {
+        auto range = rf_lane_range_intersection(n, fds.size(), lane, begin, end);
+        for (size_t i = range.first; i < range.second; ++i) values[i] = CGNet::recv_ct(fds[lane]);
+    });
+}
+inline void send_ct_lanes(const std::vector<int>& fds,
+                         const std::vector<CG_AHE::CipherText>& values, size_t n) {
+    send_ct_lanes_range(fds, values, n, 0, n);
+}
+inline void recv_ct_lanes(const std::vector<int>& fds,
+                         std::vector<CG_AHE::CipherText>& values, size_t n) {
+    recv_ct_lanes_range(fds, values, n, 0, n);
 }
 
 // Call once at main() startup — forces all workers to build their CG_Scheme.
@@ -260,8 +264,8 @@ inline std::vector<BICYCL::Mpz> rf_ole_batch_receive(
     int lfd = CGNet::listen_tcp(port_rec);
     std::cerr << "[" << role << "] listening on :" << port_rec
               << " for " << LANES << " transport lane(s)\n";
-    std::vector<int> fds = accept_rf_lanes(lfd, LANES);
-    close(lfd);
+    std::vector<int> fds = accept_rf_lanes(lfd, LANES, N);
+    CGNet::close_tcp(lfd);
 
     CGNet::send_pk(fds[0], pk);
 
@@ -368,7 +372,7 @@ inline void rf_ole_batch_send(
     CG_AHE::CG_Scheme cg = make_cg_scheme(rng);
     const auto& cs = cg.cs();
 
-    std::vector<int> fds = connect_rf_lanes(LOCALHOST, port_rfs, LANES);
+    std::vector<int> fds = connect_rf_lanes(LOCALHOST, port_rfs, LANES, N);
     std::cerr << "[" << role << "] connected to RF_S with " << LANES
               << " lane(s), n_oles=" << N << "\n";
 

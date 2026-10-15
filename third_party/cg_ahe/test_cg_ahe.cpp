@@ -40,7 +40,7 @@ int main() {
 
     // ── Setup ────────────────────────────────────────────────
     RandGen rng;
-    // 128-bit security, q is a 64-bit prime, k=1 → M = q, plaintext in Z_q
+    // 128-bit security, q is a 128-bit prime, k=1, plaintext in Z_q.
     std::cout << "[Setup] Initialising CL_HSMqk (128-bit, q~128 bits, k=1)...\n";
     auto t0 = std::chrono::steady_clock::now();
     CG_Scheme cg(128, 1, SecLevel::_128, rng);

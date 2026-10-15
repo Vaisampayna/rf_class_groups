@@ -24,7 +24,7 @@ int main(int argc, char** argv)
     CG_AHE::CG_Scheme cg = make_cg_scheme(rng);
     const BICYCL::Mpz& q = cg.cs().cleartext_bound();
 
-    size_t m_B = std::strtoull(argv[2], nullptr, 10);
+    size_t m_B = cg_parse_size(argv[2]);
     std::vector<BICYCL::Mpz> set_A;
     const char* port = ope_port_rec();
 
@@ -42,9 +42,9 @@ int main(int argc, char** argv)
         set_A = read_mpz_list_file(argv[4], q, "psi_sender");
         std::cerr << "[psi_sender] Read S_A from " << argv[4] << "\n";
     } else if (std::string(argv[3]) == "--random") {
-        size_t m_A = (argc > 4) ? std::strtoull(argv[4], nullptr, 10) : 1000;
-        uint64_t seed = (argc > 5 && std::string(argv[5]) != "--port")
-            ? std::strtoull(argv[5], nullptr, 10) : 42;
+        size_t m_A = (argc > 4) ? cg_parse_size(argv[4]) : 1000;
+        uint64_t seed = (argc > 5 && std::string(argv[5]).rfind("--", 0) != 0)
+            ? cg_parse_u64(argv[5], "argument", 10) : 42;
         std::vector<BICYCL::Mpz> ignored_B;
         make_random_psi_sets_full_field(m_A, m_B, seed, q, set_A, ignored_B);
         std::cerr << "[psi_sender] Generated random S_A of size " << m_A
@@ -63,13 +63,14 @@ int main(int argc, char** argv)
             set_A.emplace_back(std::string(argv[i]).c_str());
         }
     }
+    validate_psi_set(set_A, q, "cg_psi_sender");
     std::cerr << "[psi_sender] benchmark set input sampling excluded from protocol time: "
               << ms_since(t_input) << " ms\n";
 
     auto t_protocol = Clock::now();
     auto t_poly = Clock::now();
     size_t m_A = set_A.size();
-    size_t n_pts = psi_opa_point_count(m_A + m_B + 1, q);
+    size_t n_pts = psi_opa_point_count(cg_checked_add(cg_checked_add(m_A, m_B), 1), q);
     std::cerr << "[psi_sender] direct OLE PSI |S_A|=" << m_A
               << ", |S_B|=" << m_B << ", n_pts=" << n_pts << "\n";
 

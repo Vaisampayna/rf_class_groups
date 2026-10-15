@@ -16,15 +16,17 @@
 #
 # ENV VARS (can be overridden before calling this script):
 #   CG_RF_LANES        — number of parallel TCP transport lanes (default: 12)
-#   CG_RF_THREADS      — OpenMP threads for crypto workers (default: 12)
+#   CG_RF_THREADS      — worker threads for crypto operations (default: 12)
 #   CG_RF_CHUNK_SIZE   — streaming chunk size (default: 128)
 #   CG_Q_NBITS         — class group field size in bits (default: 128)
 #   CG_CONNECT_RETRIES — max connection retries for TCP (default: 7200)
 
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+source "$ROOT/scripts/run_common.sh"
+cg_run_init lan
 
-# --- Build directory: prefer build-2pc (matches benchmark setup), fall back to build ---
+# --- Build directory: prefer build-2pc when present, fall back to build ---
 BUILD_DIR="${CG_BUILD_DIR:-}"
 if [[ -z "$BUILD_DIR" ]]; then
     if [[ -x "$ROOT/build-2pc/cg_rf_psi_sender" ]]; then
@@ -38,9 +40,10 @@ if [[ -z "$BUILD_DIR" ]]; then
     fi
 fi
 echo "[sender] Using build dir: $BUILD_DIR"
+CALLER_DIR="$PWD"
 cd "$BUILD_DIR"
 
-# --- Environment: match the benchmark setup exactly ---
+# --- Environment: manual LAN defaults; paper sweeps may override these values ---
 export CG_Q_NBITS="${CG_Q_NBITS:-128}"
 export CG_K="${CG_K:-1}"
 export CG_BENCH_INPUT_BITS="${CG_BENCH_INPUT_BITS:-128}"
@@ -74,7 +77,7 @@ SYSTEM_B_IP="${1:?Usage: $0 <System_B_IP> [--random <m_A> <m_B> [seed]] OR [\"<S
 MODE="${2:-explicit}"
 
 # --- Logging ---
-LOG_DIR="$ROOT/logs"
+LOG_DIR="$CG_RUN_LOG_DIR"
 mkdir -p "$LOG_DIR"
 rm -f "$LOG_DIR"/psi_sender.log "$LOG_DIR"/psi_rf_sender.log
 
@@ -94,7 +97,7 @@ echo "============================================="
 
 wait_or_report() {
     local pid="$1" label="$2" file="$3"
-    set +e; wait "$pid"; local status=$?; set -e
+    set +e; cg_wait_child "$pid"; local status=$?; set -e
     if (( status != 0 )); then
         echo "ERROR: $label failed (exit $status). Tail of log:" >&2
         tail -n 40 "$file" >&2 2>/dev/null || true
@@ -109,6 +112,7 @@ if [[ "$MODE" == "--random" ]]; then
     echo "[sender] Mode: RANDOM  |S_A|=$MA  |S_B|=$MB  seed=$SEED"
 elif [[ "$MODE" == "--file" ]]; then
     SET_A_FILE="${3:-$ROOT/set_A.txt}"
+[[ -z "${SET_A_FILE:-}" || "$SET_A_FILE" == /* ]] || SET_A_FILE="$CALLER_DIR/$SET_A_FILE"
     MB="${4:-1000}"
     MA="$(wc -w <"$SET_A_FILE")"
     echo "[sender] Mode: FILE  |S_A|=$MA  |S_B|=$MB  set_A=$SET_A_FILE"
@@ -142,8 +146,7 @@ PID_S=$!
 echo "[sender] PSI sender started (PID=$PID_S)."
 echo "[sender] Waiting for protocol to complete... (tail -f $LOG_DIR/psi_sender.log to monitor)"
 
-wait_or_report "$PID_RFS" "sender firewall" "$LOG_DIR/psi_rf_sender.log"
-wait_or_report "$PID_S"   "PSI sender"      "$LOG_DIR/psi_sender.log"
+cg_wait_all "$PID_RFS" "$PID_S"
 
 echo ""
 echo "============================================="

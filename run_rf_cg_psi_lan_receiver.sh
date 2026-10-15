@@ -16,15 +16,17 @@
 #
 # ENV VARS (can be overridden before calling this script):
 #   CG_RF_LANES        — number of parallel TCP transport lanes (default: 12)
-#   CG_RF_THREADS      — OpenMP threads for crypto workers (default: 10)
+#   CG_RF_THREADS      — worker threads for crypto operations (default: 10)
 #   CG_RF_CHUNK_SIZE   — streaming chunk size (default: 128)
 #   CG_Q_NBITS         — class group field size in bits (default: 128)
 #   CG_CONNECT_RETRIES — max connection retries for TCP (default: 7200)
 
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+source "$ROOT/scripts/run_common.sh"
+cg_run_init lan
 
-# --- Build directory: prefer build-2pc (matches benchmark setup), fall back to build ---
+# --- Build directory: prefer build-2pc when present, fall back to build ---
 BUILD_DIR="${CG_BUILD_DIR:-}"
 if [[ -z "$BUILD_DIR" ]]; then
     if [[ -x "$ROOT/build-2pc/cg_rf_psi_receiver" ]]; then
@@ -38,9 +40,10 @@ if [[ -z "$BUILD_DIR" ]]; then
     fi
 fi
 echo "[receiver] Using build dir: $BUILD_DIR"
+CALLER_DIR="$PWD"
 cd "$BUILD_DIR"
 
-# --- Environment: match the benchmark setup exactly ---
+# --- Environment: manual LAN defaults; paper sweeps may override these values ---
 export CG_Q_NBITS="${CG_Q_NBITS:-128}"
 export CG_K="${CG_K:-1}"
 export CG_BENCH_INPUT_BITS="${CG_BENCH_INPUT_BITS:-128}"
@@ -70,7 +73,7 @@ psi_expected_opa_points() {
 }
 
 # --- Logging ---
-LOG_DIR="$ROOT/logs"
+LOG_DIR="$CG_RUN_LOG_DIR"
 mkdir -p "$LOG_DIR"
 rm -f "$LOG_DIR"/psi_receiver.log "$LOG_DIR"/psi_rf_receiver.log
 
@@ -89,7 +92,7 @@ echo "============================================="
 
 wait_or_report() {
     local pid="$1" label="$2" file="$3"
-    set +e; wait "$pid"; local status=$?; set -e
+    set +e; cg_wait_child "$pid"; local status=$?; set -e
     if (( status != 0 )); then
         echo "ERROR: $label failed (exit $status). Tail of log:" >&2
         tail -n 40 "$file" >&2 2>/dev/null || true
@@ -108,6 +111,7 @@ if [[ "$MODE" == "--random" ]]; then
         >"$LOG_DIR/psi_receiver.log" 2>&1 &
 elif [[ "$MODE" == "--file" ]]; then
     SET_B_FILE="${2:-$ROOT/set_B.txt}"
+[[ -z "${SET_B_FILE:-}" || "$SET_B_FILE" == /* ]] || SET_B_FILE="$CALLER_DIR/$SET_B_FILE"
     MA="${3:-1000}"
     OUT_FILE="${4:-$ROOT/intersection_out.txt}"
     TIMING_FILE="${5:-}"
@@ -145,8 +149,7 @@ echo "[receiver] PSI receiver started (PID=$PID_R)."
 echo "[receiver] Receiver Firewall started immediately (PID=$PID_RFR). Listening on :9002 for System A."
 echo "[receiver] Waiting for protocol to complete... (tail -f $LOG_DIR/psi_receiver.log to monitor)"
 
-wait_or_report "$PID_R"   "PSI receiver"      "$LOG_DIR/psi_receiver.log"
-wait_or_report "$PID_RFR" "receiver firewall" "$LOG_DIR/psi_rf_receiver.log"
+cg_wait_all "$PID_R" "$PID_RFR"
 
 echo ""
 echo "============================================="

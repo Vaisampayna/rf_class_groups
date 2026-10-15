@@ -35,3 +35,5 @@ target_link_libraries(bicycl_iface INTERFACE
 add_executable(test_cg_ahe test_cg_ahe.cpp)
 target_include_directories(test_cg_ahe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(test_cg_ahe PRIVATE bicycl_iface)
+# Keep test assertions enabled in Release builds.
+target_compile_options(test_cg_ahe PRIVATE -UNDEBUG)

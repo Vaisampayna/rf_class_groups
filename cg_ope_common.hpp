@@ -79,6 +79,7 @@ inline BICYCL::Mpz eval_poly_horner(
     if (coeffs.empty())
         return BICYCL::Mpz(0UL);
     BICYCL::Mpz acc = coeffs.back();
+    mod_q(acc, q);
     for (size_t idx = coeffs.size() - 1; idx-- > 0;) {
         BICYCL::Mpz::mul(acc, acc, alpha);
         BICYCL::Mpz::add(acc, acc, coeffs[idx]);
@@ -93,8 +94,8 @@ inline void build_ope_sender_ole_inputs(
     std::vector<BICYCL::Mpz>& a_vals,
     std::vector<BICYCL::Mpz>& b_vals)
 {
-    // Convert a degree-d OPE instance into d OLE instances.  The sender masks
-    // each Horner state with rho_i so Bob only learns the final p(alpha).
+    // Convert a degree-d OPE instance into d OLE instances. The sender masks
+    // each Horner state with rho_i so the receiver only learns final p(alpha).
     if (coeffs.size() < 2)
         throw std::runtime_error("OPE requires degree >= 1");
 
@@ -105,8 +106,9 @@ inline void build_ope_sender_ole_inputs(
     thread_local BICYCL::RandGen rng = make_secure_randgen();
     BICYCL::Mpz s_prev = coeffs[d];
 
-    // Each OLE implements one masked Horner transition. A sends (A_i, B_i);
-    // Bob receives A_i * alpha + B_i and folds it into his masked state.
+    // Each OLE implements one masked Horner transition. The sender contributes
+    // (A_i, B_i); the receiver obtains A_i * alpha + B_i and folds it into its
+    // masked state.
     for (size_t i = 1; i < d; ++i) {
         BICYCL::Mpz rho = rng.random_mpz(q);
         a_vals[i - 1] = s_prev;
@@ -123,8 +125,8 @@ inline BICYCL::Mpz finish_ope_receiver(
     const BICYCL::Mpz& alpha,
     const BICYCL::Mpz& q)
 {
-    // Bob's masked Horner recurrence.  y_i are the OLE outputs generated from
-    // build_ope_sender_ole_inputs(), all evaluated at the same alpha.
+    // Receiver-side masked Horner recurrence. y_i are the OLE outputs generated
+    // from build_ope_sender_ole_inputs(), all evaluated at the same alpha.
     if (y_vals.empty())
         throw std::runtime_error("OPE requires at least one OLE output");
 
@@ -161,8 +163,8 @@ inline std::vector<BICYCL::Mpz> direct_ole_batch_receive(
     int lfd = CGNet::listen_tcp(port);
     std::cerr << "[" << role << "] listening on :" << port
               << " for " << LANES << " lane(s)\n";
-    std::vector<int> fds = accept_rf_lanes(lfd, LANES);
-    close(lfd);
+    std::vector<int> fds = accept_rf_lanes(lfd, LANES, N);
+    CGNet::close_tcp(lfd);
 
     CGNet::send_pk(fds[0], pk);
 
@@ -252,7 +254,7 @@ inline void direct_ole_batch_send(
     CG_AHE::CG_Scheme& cg = existing_cg ? *existing_cg : *owned_cg;
     const auto& cs = cg.cs();
 
-    std::vector<int> fds = connect_rf_lanes(host, port, LANES);
+    std::vector<int> fds = connect_rf_lanes(host, port, LANES, N);
     std::cerr << "[" << role << "] connected to " << host << ":" << port
               << " with " << LANES << " lane(s)\n";
 

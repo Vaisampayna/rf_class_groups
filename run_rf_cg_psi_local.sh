@@ -7,10 +7,13 @@
 
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+source "$ROOT/scripts/run_common.sh"
+cg_run_init local
 BUILD_DIR="${CG_BUILD_DIR:-$ROOT/build}"
 if [[ ! -x "$BUILD_DIR/cg_rf_psi_receiver" || ! -x "$BUILD_DIR/cg_rf_psi_sender" ]]; then
     "$ROOT/build_local.sh"
 fi
+CALLER_DIR="$PWD"
 cd "$BUILD_DIR"
 
 SKIP_CHECK="${CG_SKIP_CHECKS:-${CG_SKIP_CHECK:-0}}"
@@ -27,7 +30,7 @@ export CG_K="${CG_K:-1}"
 export CG_BENCH_INPUT_BITS="${CG_BENCH_INPUT_BITS:-128}"
 export CG_FIXED_Q="${CG_FIXED_Q:-170141183460469232709364739622490341377}"
 
-LOG_DIR="$ROOT/logs"
+LOG_DIR="$CG_RUN_LOG_DIR"
 INPUT_DIR="${CG_PSI_INPUT_DIR:-$ROOT/inputs/psi}"
 mkdir -p "$LOG_DIR"
 rm -f "$LOG_DIR"/psi_receiver.log "$LOG_DIR"/psi_sender.log \
@@ -35,8 +38,11 @@ rm -f "$LOG_DIR"/psi_receiver.log "$LOG_DIR"/psi_sender.log \
 
 if [[ "$ARG1" == "--files" ]]; then
     SET_A_FILE="${2:?missing set_A file}"
+[[ -z "${SET_A_FILE:-}" || "$SET_A_FILE" == /* ]] || SET_A_FILE="$CALLER_DIR/$SET_A_FILE"
     SET_B_FILE="${3:?missing set_B file}"
+[[ -z "${SET_B_FILE:-}" || "$SET_B_FILE" == /* ]] || SET_B_FILE="$CALLER_DIR/$SET_B_FILE"
     TRUE_FILE="${4:-}"
+[[ -z "${TRUE_FILE:-}" || "$TRUE_FILE" == /* ]] || TRUE_FILE="$CALLER_DIR/$TRUE_FILE"
 else
     MA="$ARG1"
     MB="$ARG2"
@@ -63,13 +69,16 @@ else
 fi
 echo "    receiver output = $OUT_FILE"
 echo "    plaintext q = $CG_FIXED_Q"
-echo "    n_pts (OLE calls) = $((MA + MB + 1))"
+RAW_N=$((MA + MB + 1))
+export CG_RF_EXPECTED_N="$RAW_N"
+if [[ "${CG_USE_NTT_POLY:-1}" != 0 && "$CG_FIXED_Q" == 170141183460469232709364739622490341377 ]]; then
+    CG_RF_EXPECTED_N=1
+    while (( CG_RF_EXPECTED_N < RAW_N )); do CG_RF_EXPECTED_N=$((CG_RF_EXPECTED_N * 2)); done
+fi
+echo "    n_pts (OLE calls) = $CG_RF_EXPECTED_N"
 echo "    transport lanes = $CG_RF_LANES"
 
-# Stop processes bound to the demo ports before launching the pipeline.
-for port in 9001 9002 9003; do
-    fuser -k "$port/tcp" 2>/dev/null || true
-done
+: # Ports are owned through the run lock; no global port cleanup.
 sleep 1
 
 # ── Launch pipeline (Receiver → R-RF → S-RF → Sender) ──────────────────────
@@ -93,18 +102,7 @@ echo "Processes started. Waiting for completion..."
 echo "  Receiver PID=$PID_R, R-RF PID=$PID_RFR, S-RF PID=$PID_RFS, Sender PID=$PID_S"
 echo ""
 
-for item in \
-    "$PID_R:$LOG_DIR/psi_receiver.log:PSI receiver" \
-    "$PID_RFR:$LOG_DIR/psi_rf_receiver.log:receiver firewall" \
-    "$PID_RFS:$LOG_DIR/psi_rf_sender.log:sender firewall" \
-    "$PID_S:$LOG_DIR/psi_sender.log:PSI sender"; do
-    IFS=: read -r pid file label <<<"$item"
-    if ! wait "$pid"; then
-        echo "ERROR: $label failed. Log follows:" >&2
-        cat "$file" >&2 2>/dev/null || true
-        exit 1
-    fi
-done
+cg_wait_all "$PID_R" "$PID_RFR" "$PID_RFS" "$PID_S"
 
 echo "=== PSI Results ==="
 cat "$LOG_DIR/psi_receiver.log"

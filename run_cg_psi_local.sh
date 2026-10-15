@@ -8,6 +8,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+source "$ROOT/scripts/run_common.sh"
+cg_run_init local
 BUILD_DIR="${CG_BUILD_DIR:-$ROOT/build}"
 ARG1="${1:-5}"
 ARG2="${2:-5}"
@@ -17,16 +19,15 @@ export CG_Q_NBITS="${CG_Q_NBITS:-128}"
 export CG_K="${CG_K:-1}"
 export CG_BENCH_INPUT_BITS="${CG_BENCH_INPUT_BITS:-128}"
 
-if [[ ! -x "$BUILD_DIR/cg_psi_receiver" || ! -x "$BUILD_DIR/cg_psi_sender" ]]; then
+if [[ ! -x "$BUILD_DIR/cg_psi_receiver" || ! -x "$BUILD_DIR/cg_psi_sender" || ! -x "$BUILD_DIR/cg_print_q" ]]; then
     cmake -S "$ROOT" -B "$BUILD_DIR"
-    cmake --build "$BUILD_DIR" --target cg_psi_receiver cg_psi_sender -j
+    cmake --build "$BUILD_DIR" --target cg_psi_receiver cg_psi_sender cg_print_q -j
 fi
 
-LOG_DIR="$ROOT/logs/psi_direct"
+LOG_DIR="$CG_RUN_LOG_DIR/psi_direct"
 INPUT_DIR="${CG_PSI_INPUT_DIR:-$ROOT/inputs/psi_direct}"
 mkdir -p "$LOG_DIR"
 rm -f "$LOG_DIR"/receiver.log "$LOG_DIR"/sender.log "$LOG_DIR"/intersection_out.txt
-fuser -k "$PORT/tcp" 2>/dev/null || true
 sleep 1
 
 if [[ "$ARG1" == "--files" ]]; then
@@ -43,7 +44,7 @@ elif [[ "$ARG1" =~ ^[0-9]+$ ]] && [[ "$ARG2" =~ ^[0-9]+$ ]]; then
     SET_B_FILE="$INPUT_DIR/set_B.txt"
     TRUE_FILE="$INPUT_DIR/true_intersection.txt"
     python3 "$ROOT/generate_sets.py" "$MA" "$MB" "$OVERLAP" \
-        "$SET_A_FILE" "$SET_B_FILE" "$TRUE_FILE" "$SEED" 128
+        "$SET_A_FILE" "$SET_B_FILE" "$TRUE_FILE" "$SEED" "${CG_PSI_INPUT_BITS:-128}" "$("$BUILD_DIR/cg_print_q")"
 else
     echo "Usage: $0 [m_A m_B [overlap] [seed]] OR --files set_A.txt set_B.txt true_intersection.txt" >&2
     exit 2
@@ -63,16 +64,7 @@ sleep 1
     --port "$PORT" >"$LOG_DIR/sender.log" 2>&1 &
 PID_S=$!
 
-if ! wait "$PID_R"; then
-    echo "ERROR: PSI receiver failed. Log follows:" >&2
-    cat "$LOG_DIR/receiver.log" >&2 2>/dev/null || true
-    exit 1
-fi
-if ! wait "$PID_S"; then
-    echo "ERROR: PSI sender failed. Log follows:" >&2
-    cat "$LOG_DIR/sender.log" >&2 2>/dev/null || true
-    exit 1
-fi
+cg_wait_all "$PID_R" "$PID_S"
 
 echo "=== Direct PSI Results ==="
 cat "$LOG_DIR/receiver.log"

@@ -17,18 +17,31 @@ if [[ "$#" -eq 0 ]]; then
     SIZES=(1024 2048 4096 8192 16384 32768)
 fi
 
+export LOCAL_IP="${LOCAL_IP:-}"
+export REMOTE_IP="${REMOTE_IP:-}"
+export LOCAL_USER="${LOCAL_USER:-}"
+export REMOTE_USER="${REMOTE_USER:-}"
+export LOCAL_ROOT="${LOCAL_ROOT:-}"
+export REMOTE_ROOT="${REMOTE_ROOT:-}"
+export BUILD_DIR="${BUILD_DIR:-build-2pc}"
+export CHECKER_DIR="${CHECKER_DIR:-$ROOT/build-portable}"
+
+missing=()
+[[ -n "$LOCAL_IP" ]] || missing+=(LOCAL_IP)
+[[ -n "$REMOTE_IP" ]] || missing+=(REMOTE_IP)
+[[ -n "$LOCAL_USER" ]] || missing+=(LOCAL_USER)
+[[ -n "$REMOTE_USER" ]] || missing+=(REMOTE_USER)
+[[ -n "$LOCAL_ROOT" ]] || missing+=(LOCAL_ROOT)
+[[ -n "$REMOTE_ROOT" ]] || missing+=(REMOTE_ROOT)
+if (( ${#missing[@]} )); then
+    printf 'Missing required 2PC setting(s): %s\n' "${missing[*]}" >&2
+    printf 'Set LOCAL_IP, REMOTE_IP, LOCAL_USER, REMOTE_USER, LOCAL_ROOT, and REMOTE_ROOT before running the sweep.\n' >&2
+    exit 2
+fi
+
 STAMP="$(TZ=UTC date +%Y%m%d_%H%M%S_UTC)"
 SWEEP_DIR="${OUT_DIR:-$ROOT/benchmark_2pc_rf_psi2_sweep_${STAMP}}"
 mkdir -p "$SWEEP_DIR"
-
-export LOCAL_IP="${LOCAL_IP:-PARTY_B_IP}"
-export REMOTE_IP="${REMOTE_IP:-PARTY_A_IP}"
-export LOCAL_USER="${LOCAL_USER:-party_b_user}"
-export REMOTE_USER="${REMOTE_USER:-party_a_user}"
-export LOCAL_ROOT="${LOCAL_ROOT:-/path/to/party_b/rf_class_groups}"
-export REMOTE_ROOT="${REMOTE_ROOT:-/path/to/party_a/rf_class_groups}"
-export BUILD_DIR="${BUILD_DIR:-build-2pc}"
-export CHECKER_DIR="${CHECKER_DIR:-$ROOT/build-portable}"
 
 export CG_Q_NBITS="${CG_Q_NBITS:-128}"
 export CG_K="${CG_K:-1}"
@@ -37,8 +50,8 @@ export CG_PSI_INPUT_BITS="${CG_PSI_INPUT_BITS:-128}"
 export CG_RF_LANES="${CG_RF_LANES:-8}"
 export CG_RF_THREADS_LOCAL="${CG_RF_THREADS_LOCAL:-28}"
 export CG_RF_THREADS_REMOTE="${CG_RF_THREADS_REMOTE:-32}"
-export CG_RF_THREADS_PSI2_LOCAL="${CG_RF_THREADS_PSI2_LOCAL:-14}"
-export CG_RF_THREADS_PSI2_REMOTE="${CG_RF_THREADS_PSI2_REMOTE:-16}"
+export CG_RF_THREADS_PSI2_LOCAL="${CG_RF_THREADS_PSI2_LOCAL:-28}"
+export CG_RF_THREADS_PSI2_REMOTE="${CG_RF_THREADS_PSI2_REMOTE:-32}"
 export CG_RF_CHUNK_SIZE="${CG_RF_CHUNK_SIZE:-128}"
 export CG_CONNECT_RETRIES="${CG_CONNECT_RETRIES:-7200}"
 export TIMEOUT_S="${TIMEOUT_S:-7200}"

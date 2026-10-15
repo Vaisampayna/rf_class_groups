@@ -2,7 +2,7 @@
 """Extract structured timing rows from protocol stderr logs.
 
 The benchmark sweep keeps raw logs for reproducibility and appends parsed
-phase timings to timings.csv for easier plotting/debugging.
+phase timings to timings.csv for plotting and diagnostics.
 """
 
 import csv

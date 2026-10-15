@@ -21,13 +21,17 @@ def sample_unique(rng, count, used, bound):
 
 def generate_sets(size_a, size_b, overlap, file_a, file_b, file_true,
                   seed=42, bits=DEFAULT_BITS, field_bound=None):
+    if size_a <= 0 or size_b <= 0 or min(size_a, size_b) < overlap or overlap < 0:
+        raise ValueError("Sizes must be positive and overlap must lie in [0,min(size_a,size_b)].")
+    if max(size_a, size_b) > 16777216 or not 1 <= bits <= 4096:
+        raise ValueError("Input sizes or bit bound exceed supported limits.")
     if overlap > min(size_a, size_b):
         raise ValueError("Overlap cannot be greater than the size of the smallest set.")
 
     rng = random.Random(seed)
     bit_bound = 1 << bits
     bound = min(bit_bound, field_bound) if field_bound is not None else bit_bound
-    if bound <= size_a + size_b:
+    if bound < size_a + size_b - overlap:
         raise ValueError("Sampling bound is too small for the requested unique sets.")
     used = set()
     intersection = sample_unique(rng, overlap, used, bound)

@@ -7,6 +7,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+source "$ROOT/scripts/run_common.sh"
+cg_run_init local
 BUILD_DIR="${CG_BUILD_DIR:-$ROOT/build-portable}"
 DEGREE="${1:-1000}"
 export CG_RF_LANES="${CG_RF_LANES:-4}"
@@ -16,13 +18,11 @@ if [[ ! -x "$BUILD_DIR/cg_ope_receiver" || ! -x "$BUILD_DIR/cg_ope_sender" ]]; t
     cmake --build "$BUILD_DIR" --target cg_ope_receiver cg_ope_sender -j
 fi
 
-LOG_DIR="$ROOT/logs/ope_direct"
+LOG_DIR="$CG_RUN_LOG_DIR/ope_direct"
 mkdir -p "$LOG_DIR"
 rm -f "$LOG_DIR"/receiver.log "$LOG_DIR"/sender.log
 
-for port in "${CG_OPE_PORT_REC:-9103}" "${CG_OPE_PORT_VERIFY:-9104}"; do
-    fuser -k "$port/tcp" 2>/dev/null || true
-done
+: # Ports are owned through the run lock; no global port cleanup.
 sleep 1
 
 echo "=== Direct OPE over batched OLE: degree=$DEGREE, lanes=$CG_RF_LANES ==="
@@ -34,16 +34,7 @@ sleep 1
 "$BUILD_DIR/cg_ope_sender" 127.0.0.1 "$DEGREE" >"$LOG_DIR/sender.log" 2>&1 &
 PID_S=$!
 
-if ! wait "$PID_R"; then
-    echo "ERROR: OPE receiver failed. Log follows:" >&2
-    cat "$LOG_DIR/receiver.log" >&2 2>/dev/null || true
-    exit 1
-fi
-if ! wait "$PID_S"; then
-    echo "ERROR: OPE sender failed. Log follows:" >&2
-    cat "$LOG_DIR/sender.log" >&2 2>/dev/null || true
-    exit 1
-fi
+cg_wait_all "$PID_R" "$PID_S"
 
 echo "=== Direct OPE Logs ==="
 cat "$LOG_DIR/receiver.log"

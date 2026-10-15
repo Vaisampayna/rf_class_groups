@@ -1,17 +1,10 @@
 /**
- * cg_thread_pool.hpp — Persistent worker-thread pool for CG-AHE RF-PSI
+ * cg_thread_pool.hpp - Persistent worker-thread pool for CG-AHE protocols
  *
- * CRITICAL DESIGN:
- *   Worker threads are created ONCE in the constructor and kept alive via a
- *   condition-variable task queue. This means thread_local CG_AHE::CG_Scheme
- *   objects (560ms each to construct) are also initialised exactly ONCE per
- *   worker thread, not once per parallel_for() call.
- *
- *   Previous approach (new std::thread per call):
- *     N=100, 8 parallel_for calls × 12 threads × 560ms = ~54s wasted init
- *
- *   This approach:
- *     12 threads × 560ms (once at startup) + 0ms per subsequent call
+ * Worker threads are created once and reused through a condition-variable task
+ * queue. Each worker keeps its own thread-local CG-AHE scheme state, so
+ * encryption, decryption, mauling, and polynomial loops can run in parallel
+ * without repeatedly constructing BICYCL/CG-AHE objects.
  *
  * Usage:
  *   CGThreadPool pool(num_threads);   // blocks until all workers are ready
@@ -19,6 +12,7 @@
  */
 #pragma once
 
+#include "cg_config.hpp"
 #include <thread>
 #include <vector>
 #include <queue>
@@ -36,9 +30,16 @@ public:
         : n_(n_threads == 0 ? std::thread::hardware_concurrency() : n_threads)
         , stop_(false)
     {
+        if (n_ > 256) throw std::runtime_error("too many worker threads");
         workers_.reserve(n_);
-        for (size_t i = 0; i < n_; ++i)
-            workers_.emplace_back([this] { worker_loop(); });
+        try {
+            for (size_t i = 0; i < n_; ++i) workers_.emplace_back([this] { worker_loop(); });
+        } catch (...) {
+            { std::lock_guard<std::mutex> lock(mu_); stop_ = true; }
+            cv_work_.notify_all();
+            for (auto& worker : workers_) worker.join();
+            throw;
+        }
     }
 
     ~CGThreadPool() {
@@ -50,7 +51,7 @@ public:
         for (auto& w : workers_) w.join();
     }
 
-    // Disable copy/move
+    // The pool owns worker threads and is intentionally not copyable.
     CGThreadPool(const CGThreadPool&) = delete;
     CGThreadPool& operator=(const CGThreadPool&) = delete;
 
@@ -97,11 +98,9 @@ public:
                     has_exception.store(true, std::memory_order_release);
                 }
             }
+            std::unique_lock<std::mutex> lk(done_mu);
             size_t finished = done_count.fetch_add(1, std::memory_order_acq_rel) + 1;
-            if (finished == n_tasks) {
-                std::unique_lock<std::mutex> lk(done_mu);
-                done_cv.notify_one();
-            }
+            if (finished == n_tasks) done_cv.notify_one();
         };
 
         // Dispatch task to all workers
@@ -158,7 +157,7 @@ inline CGThreadPool& global_pool() {
     static CGThreadPool pool([] {
         const char* env = std::getenv("CG_RF_THREADS");
         if (env && *env) {
-            unsigned long n = std::strtoul(env, nullptr, 10);
+            size_t n = cg_parse_size(env, "CG_RF_THREADS", false, 256);
             if (n > 0) return (size_t)n;
         }
         size_t hw = std::thread::hardware_concurrency();

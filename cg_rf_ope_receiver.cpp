@@ -11,7 +11,7 @@
 
 int main(int argc, char** argv)
 {
-    size_t degree = (argc > 1) ? std::strtoull(argv[1], nullptr, 10) : 1000;
+    size_t degree = (argc > 1) ? cg_parse_size(argv[1]) : 1000;
     const char* alpha_file = nullptr;
     for (int i = 2; i < argc; ++i) {
         std::string arg = argv[i];

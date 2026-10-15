@@ -22,6 +22,7 @@ static void prewarm_pool(CGThreadPool& pool) {
 }
 
 int main(int argc, char* argv[]) {
+    size_t n_pts = required_env_size("CG_RF_EXPECTED_N");
     size_t N_THREADS = std::thread::hardware_concurrency();
     size_t LANES = rf_transport_lanes();
     size_t CHUNK = rf_chunk_size();
@@ -43,15 +44,14 @@ int main(int argc, char* argv[]) {
     const char* rfr_ip = (argc > 1) ? argv[1] : LOCALHOST;
     const char* port_rfr = rf_port_rfr();
     const char* port_rfs = rf_port_rfs();
-    std::vector<int> rfr_fds = connect_rf_lanes(rfr_ip, port_rfr, LANES);
+    std::vector<int> rfr_fds = connect_rf_lanes(rfr_ip, port_rfr, LANES, n_pts);
 
     int lfd = CGNet::listen_tcp(port_rfs);
     std::cerr << "[rf_sender_opa] listening on :" << port_rfs
               << " for " << LANES << " transport lane(s)\n";
-    std::vector<int> sen_fds = accept_rf_lanes(lfd, LANES);
-    close(lfd);
+    std::vector<int> sen_fds = accept_rf_lanes(lfd, LANES, n_pts);
+    CGNet::close_tcp(lfd);
 
-    size_t n_pts = required_env_size("CG_RF_EXPECTED_N");
     std::cerr << "[rf_sender_opa] n_pts=" << n_pts << "\n";
 
     CG_AHE::PublicKey pk_prime = CGNet::recv_pk(rfr_fds[0], cs);

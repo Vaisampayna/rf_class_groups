@@ -8,19 +8,13 @@ import sys
 
 def check_correctness(true_file, receiver_output_file):
     try:
-        with open(true_file, 'r') as f:
-            true_set = set(line.strip() for line in f if line.strip())
-    except FileNotFoundError:
-        print(f"Error: file {true_file} not found.")
+        from psi_check_io import read_set
+        true_set = read_set(true_file)
+        receiver_set = read_set(receiver_output_file)
+    except (OSError, ValueError) as exc:
+        print(f"FAILURE: {exc}")
         sys.exit(1)
-        
-    try:
-        with open(receiver_output_file, 'r') as f:
-            receiver_set = set(line.strip() for line in f if line.strip())
-    except FileNotFoundError:
-        print(f"Error: file {receiver_output_file} not found.")
-        sys.exit(1)
-        
+
     missing = true_set - receiver_set
     extra = receiver_set - true_set
     

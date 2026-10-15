@@ -88,7 +88,9 @@ the receiver decrypts it.
   using the same PSI polynomial relation through RF-OPA.
 - `cg_psi2_receiver.cpp` and `cg_psi2_sender.cpp` implement direct two-way PSI:
   the receiver first computes the direct one-way PSI result, then sends the
-  intersection back to the sender on a direct reveal channel.
+  intersection back to the sender on a direct clear reveal channel. Unused
+  slots contain zero, matching RF PSI2; if zero belongs only to A, an unused
+  slot falsely adds zero to A's output.
 - `cg_rf_psi2_reveal_receiver.cpp`, `cg_rf_psi2_reveal_sender.cpp`,
   `cg_rf_psi2_reveal_rrf.cpp`, and `cg_rf_psi2_reveal_srf.cpp` implement RF
   two-way PSI: one-way RF-PSI followed by an encrypted reveal-back phase through

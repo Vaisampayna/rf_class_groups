@@ -11,6 +11,7 @@
 
 int main(int argc, char** argv)
 {
+    size_t n = required_env_size("CG_RF_EXPECTED_N");
     const size_t LANES = rf_transport_lanes();
     const char* rfr_ip = (argc > 1) ? argv[1] : LOCALHOST;
     const char* port_rfr = rf_port_rfr();
@@ -22,16 +23,15 @@ int main(int argc, char** argv)
     CG_AHE::CG_Scheme cg = make_cg_scheme(rng);
     const auto& cs = cg.cs();
 
-    std::vector<int> rfr_fds = connect_rf_lanes(rfr_ip, port_rfr, LANES);
+    std::vector<int> rfr_fds = connect_rf_lanes(rfr_ip, port_rfr, LANES, n);
 
     int lfd = CGNet::listen_tcp(port_rfs);
     std::cerr << "[rf_sender_ole3] listening on :" << port_rfs
               << " for " << LANES << " lane(s)\n";
-    std::vector<int> sender_fds = accept_rf_lanes(lfd, LANES);
-    close(lfd);
+    std::vector<int> sender_fds = accept_rf_lanes(lfd, LANES, n);
+    CGNet::close_tcp(lfd);
 
     auto t_protocol = Clock::now();
-    size_t n = required_env_size("CG_RF_EXPECTED_N");
     std::cerr << "[rf_sender_ole3] n_oles=" << n << "\n";
 
     CG_AHE::PublicKey pk = CGNet::recv_pk(sender_fds[0], cs);

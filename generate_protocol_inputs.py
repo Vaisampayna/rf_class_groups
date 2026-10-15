@@ -24,7 +24,7 @@ def write_lines(path, lines):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate random benchmark input files below the plaintext modulus."
+        description="Generate bit-bounded benchmark inputs; protocol loaders reduce them modulo q."
     )
     parser.add_argument("mode", choices=["list", "ole-sender"])
     parser.add_argument("count", type=int)
@@ -32,6 +32,9 @@ def main():
     parser.add_argument("--bits", type=int, default=128)
     parser.add_argument("--seed", type=int, default=None)
     args = parser.parse_args()
+
+    if not 1 <= args.count <= 16777216 or not 1 <= args.bits <= 4096:
+        parser.error("count or bits outside supported limits")
 
     if args.mode == "list":
         write_lines(args.out, values(args.count, args.bits, args.seed))

@@ -7,8 +7,12 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+source "$ROOT/scripts/run_common.sh"
+cg_run_init local
 BUILD_DIR="${CG_BUILD_DIR:-$ROOT/build-portable}"
 DEGREE="${1:-1000}"
+cg_positive_size "$DEGREE" || exit 2
+export CG_RF_EXPECTED_N="$DEGREE"
 export CG_RF_LANES="${CG_RF_LANES:-4}"
 
 if [[ ! -x "$BUILD_DIR/cg_rf_ope_receiver" || ! -x "$BUILD_DIR/cg_rf_ope_sender" ]]; then
@@ -16,14 +20,12 @@ if [[ ! -x "$BUILD_DIR/cg_rf_ope_receiver" || ! -x "$BUILD_DIR/cg_rf_ope_sender"
     cmake --build "$BUILD_DIR" --target cg_rf_ope_receiver cg_rf_ope_sender cg_rf_receiver_firewall_opa cg_rf_sender_firewall_opa -j
 fi
 
-LOG_DIR="$ROOT/logs/ope_rf"
+LOG_DIR="$CG_RUN_LOG_DIR/ope_rf"
 mkdir -p "$LOG_DIR"
 rm -f "$LOG_DIR"/receiver.log "$LOG_DIR"/sender.log \
       "$LOG_DIR"/rf_receiver.log "$LOG_DIR"/rf_sender.log
 
-for port in "${CG_PORT_RFS:-9001}" "${CG_PORT_RFR:-9002}" "${CG_PORT_REC:-9003}" "${CG_OPE_PORT_VERIFY:-9104}"; do
-    fuser -k "$port/tcp" 2>/dev/null || true
-done
+: # Ports are owned through the run lock; no global port cleanup.
 sleep 1
 
 echo "=== RF-OPE over batched RF-OLE: degree=$DEGREE, lanes=$CG_RF_LANES ==="
@@ -43,18 +45,7 @@ sleep 2
 "$BUILD_DIR/cg_rf_ope_sender" 127.0.0.1 "$DEGREE" >"$LOG_DIR/sender.log" 2>&1 &
 PID_S=$!
 
-for item in \
-    "$PID_R:$LOG_DIR/receiver.log:RF-OPE receiver" \
-    "$PID_RRF:$LOG_DIR/rf_receiver.log:receiver firewall" \
-    "$PID_SRF:$LOG_DIR/rf_sender.log:sender firewall" \
-    "$PID_S:$LOG_DIR/sender.log:RF-OPE sender"; do
-    IFS=: read -r pid file label <<<"$item"
-    if ! wait "$pid"; then
-        echo "ERROR: $label failed. Log follows:" >&2
-        cat "$file" >&2 2>/dev/null || true
-        exit 1
-    fi
-done
+cg_wait_all "$PID_R" "$PID_RRF" "$PID_SRF" "$PID_S"
 
 echo "=== RF-OPE Logs ==="
 cat "$LOG_DIR/receiver.log"

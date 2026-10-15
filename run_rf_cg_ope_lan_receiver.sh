@@ -6,10 +6,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+source "$ROOT/scripts/run_common.sh"
+cg_run_init lan
 BUILD_DIR="${CG_BUILD_DIR:-$ROOT/build}"
 if [[ ! -x "$BUILD_DIR/cg_rf_ope_receiver" ]]; then
     "$ROOT/build_local.sh"
 fi
+CALLER_DIR="$PWD"
 cd "$BUILD_DIR"
 
 DEGREE="${1:-1000}"
@@ -21,19 +24,17 @@ DEFAULT_THREADS=$(( ($(nproc) + 1) / 2 ))
 if (( DEFAULT_THREADS < 1 )); then DEFAULT_THREADS=1; fi
 export CG_RF_THREADS="${CG_RF_THREADS:-$DEFAULT_THREADS}"
 
-LOG_DIR="$ROOT/logs/ope_receiver"
+LOG_DIR="$CG_RUN_LOG_DIR/ope_receiver"
 mkdir -p "$LOG_DIR"
 rm -f "$LOG_DIR"/ope_receiver.log "$LOG_DIR"/ope_rf_receiver.log
 
 cleanup_children() {
     jobs -pr | xargs -r kill 2>/dev/null || true
 }
-trap cleanup_children EXIT
+trap cg_cleanup_children EXIT
 
 if [[ "${CG_SKIP_PORT_CLEANUP:-0}" != "1" ]]; then
-    for port in 9002 9003 9004; do
-        fuser -k "$port/tcp" 2>/dev/null || true
-    done
+    : # Ports are owned through the run lock; no global port cleanup.
     sleep 1
 fi
 
@@ -66,7 +67,7 @@ wait_or_report() {
     local label="$2"
     local file="$3"
     set +e
-    wait "$pid"
+    cg_wait_child "$pid"
     local status=$?
     set -e
     if (( status != 0 )); then
@@ -91,8 +92,7 @@ PID_RFR=$!
 wait_for_log "$LOG_DIR/ope_receiver.log" "listening on :9003" "$PID_R" "RF-OPE receiver"
 wait_for_log "$LOG_DIR/ope_rf_receiver.log" "listening on :9002" "$PID_RFR" "receiver firewall"
 
-wait_or_report "$PID_RFR" "receiver firewall" "$LOG_DIR/ope_rf_receiver.log"
-wait_or_report "$PID_R" "RF-OPE receiver" "$LOG_DIR/ope_receiver.log"
+cg_wait_all "$PID_RFR" "$PID_R"
 
 echo "=== RF-OPE Receiver Results ==="
 cat "$LOG_DIR/ope_receiver.log"

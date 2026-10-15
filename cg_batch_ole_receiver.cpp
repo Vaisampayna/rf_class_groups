@@ -10,7 +10,7 @@
 #include <iostream>
 
 int main(int argc, char* argv[]) {
-    size_t n_oles = (argc > 1) ? std::strtoull(argv[1], nullptr, 10) : 1000;
+    size_t n_oles = (argc > 1) ? cg_parse_size(argv[1]) : 1000;
     const char* port = (argc > 2) ? argv[2] : rf_port_rec();
     const char* input_file = nullptr;
     for (int i = 3; i < argc; ++i) {
@@ -60,8 +60,8 @@ int main(int argc, char* argv[]) {
               << ", lanes=" << LANES << "\n";
     int lfd = CGNet::listen_tcp(port);
     std::cerr << "[batch_ole_receiver] listening on :" << port << "\n";
-    std::vector<int> fds = accept_rf_lanes(lfd, LANES);
-    close(lfd);
+    std::vector<int> fds = accept_rf_lanes(lfd, LANES, n_oles);
+    CGNet::close_tcp(lfd);
 
     CGNet::send_pk(fds[0], pk);
 

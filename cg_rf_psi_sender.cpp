@@ -22,7 +22,7 @@ int main(int argc, char** argv) {
     const auto& cs = cg.cs();
     const BICYCL::Mpz& q = cs.cleartext_bound();
 
-    size_t m_B = std::stoull(argv[1]);
+    size_t m_B = cg_parse_size(argv[1]);
     std::vector<BICYCL::Mpz> set_A;
 
     auto t_input = Clock::now();
@@ -34,8 +34,8 @@ int main(int argc, char** argv) {
         set_A = read_mpz_list_file(argv[3], q, "psi_sender");
         std::cerr << "[psi_sender] Read S_A from " << argv[3] << "\n";
     } else if (std::string(argv[2]) == "--random") {
-        size_t m_A = (argc > 3) ? std::stoull(argv[3]) : 1000;
-        uint64_t seed = (argc > 4) ? std::stoull(argv[4]) : 42;
+        size_t m_A = (argc > 3) ? cg_parse_size(argv[3]) : 1000;
+        uint64_t seed = (argc > 4 && std::string(argv[4]).rfind("--", 0) != 0) ? cg_parse_u64(argv[4]) : 42;
         std::vector<BICYCL::Mpz> ignored_B;
         make_random_psi_sets_full_field(m_A, m_B, seed, q, set_A, ignored_B);
 
@@ -46,12 +46,13 @@ int main(int argc, char** argv) {
         for (int i = 2; i < argc; ++i)
             set_A.emplace_back(std::string(argv[i]).c_str());
     }
+    validate_psi_set(set_A, q, "cg_rf_psi_sender");
     std::cerr << "[psi_sender] benchmark set input sampling excluded from protocol time: "
               << ms_since(t_input) << " ms\n";
 
     auto t_poly = Clock::now();
     size_t m_A = set_A.size();
-    size_t n_pts = psi_opa_point_count(m_A + m_B + 1, q);
+    size_t n_pts = psi_opa_point_count(cg_checked_add(cg_checked_add(m_A, m_B), 1), q);
     std::cerr << "[psi_sender] |S_A|=" << m_A << ", |S_B|=" << m_B
               << ", n_pts=" << n_pts << "\n";
 

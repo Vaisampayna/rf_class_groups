@@ -16,8 +16,8 @@ PSI_BITS="${CG_PSI_INPUT_BITS:-128}"
 Q_ENV="$(common_env)"
 Q_BOUND="$(ssh_local "cd '$LOCAL_ROOT/$BUILD_DIR' && export $Q_ENV; ./cg_print_q")"
 
-LOCAL_IO="/tmp/cg_direct_psi_${N}"
-REMOTE_IO="/tmp/cg_direct_psi_${N}"
+LOCAL_IO="/tmp/cg_direct_psi_${N}_${CG_SESSION_ID}"
+REMOTE_IO="/tmp/cg_direct_psi_${N}_${CG_SESSION_ID}"
 echo "==> preparing direct_psi_${N} inputs outside protocol timer"
 echo "    PSI element bound: min(2^${PSI_BITS}, q), q=${Q_BOUND}"
 run_pair "direct_psi_${N}" "local_first" \

@@ -42,6 +42,8 @@ int main(int argc, char** argv)
         return 2;
     }
 
+    cg_validate_count(additive_degree_plus_1); cg_validate_count(mask_degree_plus_1);
+    cg_validate_count(receiver_degree_plus_1); cg_validate_count(n_pts);
     BICYCL::Mpz q_sender = read_mpz_text(sin);
     BICYCL::Mpz q_receiver = read_mpz_text(rin);
     if (q_sender != q_receiver) {

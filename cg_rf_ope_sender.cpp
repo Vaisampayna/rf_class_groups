@@ -13,7 +13,7 @@
 int main(int argc, char** argv)
 {
     const char* receiver_ip = (argc > 1) ? argv[1] : LOCALHOST;
-    size_t degree = (argc > 2) ? std::strtoull(argv[2], nullptr, 10) : 1000;
+    size_t degree = (argc > 2) ? cg_parse_size(argv[2]) : 1000;
     const char* input_file = nullptr;
     for (int i = 3; i < argc; ++i) {
         std::string arg = argv[i];
