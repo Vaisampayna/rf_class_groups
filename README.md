@@ -460,7 +460,7 @@ up their own child processes. More manual role examples are in
 - `check_correctness.py`, `check_psi2_correctness.py`: PSI output checkers.
 - `extract_timings.py`, `make_reported_total_table.py`: timing extraction and reporting.
 - `scripts/`: shared launcher helpers and source packaging.
-- `review/regression.*`, `review/check_direct_padding.py`: automated tests.
+- `tests/regression.*`, `tests/check_direct_padding.py`: automated tests.
 
 See [OPERATION_COMMENTS.md](OPERATION_COMMENTS.md) for the protocol-to-source
 map, [RUN_TESTS.md](RUN_TESTS.md) for further local examples, and

@@ -7,7 +7,7 @@
  * without repeatedly constructing BICYCL/CG-AHE objects.
  *
  * Usage:
- *   CGThreadPool pool(num_threads);   // blocks until all workers are ready
+ *   CGThreadPool pool(num_threads);   // create reusable worker threads
  *   pool.parallel_for(0, N, fn);      // fn(i) for i in [0,N), blocks until done
  */
 #pragma once
@@ -57,7 +57,7 @@ public:
 
     /**
      * Execute fn(i) for i in [begin, end) across all worker threads.
-     * Uses work-stealing via an atomic cursor. Blocks until all work is done.
+     * Uses a shared atomic iteration cursor. Blocks until all work is done.
      */
     template<typename Fn>
     void parallel_for(size_t begin, size_t end, Fn fn, size_t chunk_size = 1) {
@@ -79,7 +79,7 @@ public:
         const size_t total = end - begin;
         const size_t n_tasks = std::min(n_, (total + chunk_size - 1) / chunk_size);
 
-        // Each worker task: steal iterations until cursor >= end
+        // Each worker task claims iterations until cursor >= end.
         auto task = [&] {
             try {
                 while (true) {
@@ -149,9 +149,8 @@ private:
 };
 
 /**
- * Global persistent pool — initialised once at program startup.
- * All thread_local state (CG_Scheme, RandGen) inside parallel_for lambdas
- * is constructed exactly once per worker thread.
+ * Process-wide pool, constructed on first use. Worker-local scheme and RNG
+ * state is initialized on first use by that worker and reused across tasks.
  */
 inline CGThreadPool& global_pool() {
     static CGThreadPool pool([] {

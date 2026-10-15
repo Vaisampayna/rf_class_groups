@@ -12,9 +12,11 @@ ROOT = Path(__file__).resolve().parents[1]
 def source_files():
     for path in ROOT.iterdir():
         if path.is_file() and (
-            path.suffix in {".cpp", ".hpp", ".py", ".sh", ".md"}
-            or path.name in {"CMakeLists.txt", "LICENSE", ".gitignore"}
-        ) and path.name != "code_review_report.md":
+            path.suffix in {".cpp", ".hpp", ".py", ".sh"}
+            or path.name in {"CMakeLists.txt", "LICENSE", ".gitignore",
+                             "README.md", "ARTIFACT_README.md", "RUN_2PC_SETUP.md",
+                             "RUN_TESTS.md", "OPERATION_COMMENTS.md", "VALIDATION.md"}
+        ):
             yield path
     for directory in (ROOT / "third_party", ROOT / "scripts"):
         for path in directory.rglob("*"):
@@ -25,7 +27,7 @@ def source_files():
             ) and path.suffix not in {".pyc", ".log", ".tmp"}:
                 yield path
     for name in ("regression.cpp", "regression.py", "check_direct_padding.py"):
-        yield ROOT / "review" / name
+        yield ROOT / "tests" / name
 
 
 def archive_metadata(info):

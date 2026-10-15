@@ -1,6 +1,3 @@
-Run python3 review/regression.py --build-dir build-review after building.
-Tests use temporary artifacts and owned processes; no SSH or port cleanup.
-"""
 import argparse
 import ast
 import csv
@@ -118,7 +115,7 @@ exec {{fd}}>&-
 flock -n "{lock}" true
 '''
     execute(["bash", "-c", shell], timeout=5)
-    for path in list(ROOT.glob("*.py")) + list((ROOT / "review").glob("*.py")):
+    for path in list(ROOT.glob("*.py")) + list((ROOT / "tests").glob("*.py")):
         ast.parse(path.read_text(), filename=str(path))
     for path in list(ROOT.glob("*.sh")) + list((ROOT / "scripts").glob("*.sh")):
         execute(["bash", "-n", path])
@@ -266,7 +263,7 @@ def protocol_checks(build, tmp):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--build-dir", type=Path, default=ROOT / "build-review")
+    parser.add_argument("--build-dir", type=Path, default=ROOT / "build")
     parser.add_argument("--cpp-bin", type=Path)
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="cg-regression-") as directory:
@@ -277,7 +274,7 @@ def main():
         if not args.cpp_bin:
             execute(["g++", "-std=c++17", "-O0", "-fopenmp", "-pthread", "-I" + str(ROOT),
                      "-I" + str(ROOT / "third_party"), "-I" + str(ROOT / "third_party/cg_ahe"),
-                     ROOT / "review/regression.cpp", "-o", exe, "-lgmpxx", "-lgmp", "-lcrypto"], timeout=90)
+                     ROOT / "tests/regression.cpp", "-o", exe, "-lgmpxx", "-lgmp", "-lcrypto"], timeout=90)
         execute([exe, tmp], timeout=20)
         for test in ("tcp", "count", "wrong-domain"):
             execute([exe, "transport", test], timeout=20)

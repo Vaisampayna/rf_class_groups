@@ -9,23 +9,12 @@ logs/
 inputs/
 benchmark_2pc_*/
 run_2pc_*_20*/
+paper_reproduction_*/
+dist/
 
 *.log
 *.tmp
 __pycache__/
 *.pyc
 
-.codex/
-.agents/
-.aws/
-
-
-dist/
-paper_reproduction_*/
-
-# Local development and machine-specific validation files.
-/code_review_report.md
-/review/remote_*
-/review/run_full_sweep.sh
-/review/reproduce.py
-/review/paper_reference.csv
+/review/

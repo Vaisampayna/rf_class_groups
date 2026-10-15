@@ -11,7 +11,7 @@ from psi_check_io import read_set
 from regression import free_ports
 
 def main():
-    build = Path(sys.argv[1] if len(sys.argv) > 1 else "build-review").resolve()
+    build = Path(sys.argv[1] if len(sys.argv) > 1 else "build").resolve()
     cases = [
         ("no-zero", [1, 3, 4], [1, 2, 3], {1, 3}, {1, 3}),
         ("zero-padding-collision", [0, 1, 3], [1, 2, 3], {0, 1, 3}, {1, 3}),

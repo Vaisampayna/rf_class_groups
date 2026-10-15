@@ -230,7 +230,8 @@ inline void recv_ct_lanes(const std::vector<int>& fds,
     recv_ct_lanes_range(fds, values, n, 0, n);
 }
 
-// Call once at main() startup — forces all workers to build their CG_Scheme.
+// Submit scheme-initialization tasks before the protocol. Workers initialize
+// their thread-local scheme when they first execute a cryptographic task.
 inline void prewarm_batch_pool() {
     auto& pool = global_pool();
     auto t0 = std::chrono::high_resolution_clock::now();

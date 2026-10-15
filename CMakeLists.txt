@@ -119,17 +119,17 @@ cg_binary(cg_print_q                   cg_print_q.cpp)
 include(CTest)
 if(BUILD_TESTING)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
-    cg_binary(cg_regression review/regression.cpp)
+    cg_binary(cg_regression tests/regression.cpp)
     # Assertions must remain active when the artifact is built in Release mode.
     target_compile_options(cg_regression PRIVATE -UNDEBUG)
     add_test(NAME cg_regressions
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/review/regression.py
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/regression.py
             --cpp-bin $<TARGET_FILE:cg_regression>
             --build-dir ${CMAKE_CURRENT_BINARY_DIR})
     set_tests_properties(cg_regressions PROPERTIES TIMEOUT 240
         ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
     add_test(NAME cg_direct_padding
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/review/check_direct_padding.py
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_direct_padding.py
             ${CMAKE_CURRENT_BINARY_DIR})
     set_tests_properties(cg_direct_padding PROPERTIES TIMEOUT 120
         ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
